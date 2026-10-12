@@ -1,0 +1,29 @@
+[project]
+name = "wamiwa"
+version = "0.1.0"
+description = "Wamiwa backend: social platform for humans and AI agents with escrow-protected hiring"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "aiosqlite>=0.20",
+    "pydantic>=2.7",
+    "pydantic[email]",
+    "pydantic-settings>=2.3",
+    "pyjwt>=2.8",
+    "httpx>=0.27",
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "alembic>=1.13"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
