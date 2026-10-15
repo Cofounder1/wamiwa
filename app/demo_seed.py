@@ -53,17 +53,18 @@ class DemoSeeder:
             # Kemi: verified creator with Hire Me and likeness pages.
             kemi = await self._signup(svc, "kemi", "Kemi Adeyemi", "user", date(1998, 3, 14))
             await svc.identity.submit(kemi, DocumentType.PASSPORT, "Kemi Adeyemi|1998-03-14", "selfie-kemi")
-            await svc.accounts.update_profile(kemi, {"primary_niche": "fashion", "bio": "Lagos style, everyday.",
-                                                       "location": "Lagos"})
+            await svc.accounts.update_profile(kemi, {
+                "primary_niche": "fashion", "location": "Lagos",
+                "bio": "Lagos-born stylist. Thrift flips, Ankara edits and honest beauty reviews. Booking via Wamiwa only."})
             await svc.creators.connect(kemi, SocialPlatform.INSTAGRAM, "kemi:48000")
-            await svc.hire_me.save_page(kemi, 150_00, ["demo/kemi-1.jpg"], [])
+            await svc.hire_me.save_page(kemi, 350_00, ["demo/kemi-1.jpg"], [])
             await svc.likeness_pages.add_photo(kemi, None, "demo/kemi-face.jpg", None)
-            await svc.likeness_pages.save(kemi, None, price_image_cents=100_00, price_voice_cents=150_00,
-                                          exclusivity_price_cents=200_00)
-            await svc.bank_accounts.save(kemi, "058", "0123456789", "Kemi Adeyemi", None)
+            await svc.likeness_pages.save(kemi, None, price_image_cents=140_00, price_voice_cents=220_00,
+                                          exclusivity_price_cents=380_00)
+            await svc.bank_accounts.save(kemi, "058", "0123454821", "Kemi Adeyemi", None)
             self.result.accounts.append(("Influencer", kemi.email, "Verified creator, Hire Me and likeness pages"))
 
-            # Kola (guardian) and Kiki (16).
+            # Kola (guardian) and his daughter Kiki (16).
             kiki = await self._signup(svc, "kiki", "Kiki Adebayo", "user", date(2010, 5, 2))
             kola = await self._signup(svc, "kola", "Kola Adebayo", "user", date(1984, 9, 21))
             await svc.identity.submit(kola, DocumentType.NATIONAL_ID, "Kola Adebayo|1984-09-21", "selfie-kola")
@@ -72,6 +73,8 @@ class DemoSeeder:
             uow_mail = [m for m in self.infra.providers.email.outbox if m["to"] == kola.email and "token=" in m["body"]]
             invite_token = uow_mail[-1]["body"].split("token=")[1].strip()
             await svc.guardians.accept(kola, invite_token, "father", True)
+            await svc.accounts.update_profile(kiki, {"primary_niche": "art", "location": "Enugu",
+                                                        "bio": "16. I draw people I love and places I want to go."})
             self.result.accounts.append(("Minor (16)", kiki.email, "Linked to Kola"))
             self.result.accounts.append(("Guardian", kola.email, "Manages Kiki"))
 
@@ -83,13 +86,16 @@ class DemoSeeder:
             self.result.accounts.append(("Company", zuri.email, "Verified fashion brand"))
 
             # Zainab: agent owner with two live agents.
-            zainab = await self._signup(svc, "zainab", "Zainab Musa", "user", date(1993, 1, 30))
-            await svc.identity.submit(zainab, DocumentType.DRIVERS_LICENCE, "Zainab Musa|1993-01-30", "selfie-zainab")
+            zainab = await self._signup(svc, "zainab", "Zainab Bello", "user", date(1993, 1, 30))
+            await svc.identity.submit(zainab, DocumentType.DRIVERS_LICENCE, "Zainab Bello|1993-01-30", "selfie-zainab")
             agents = {}
-            for name, handle, skills, rates in (
-                    ("Scribe", "scribe", ["writing", "captions"], {"caption pack": 15_00, "blog post": 40_00}),
-                    ("Lens", "lens", ["research", "explain"], {"research brief": 50_00})):
-                agent = await svc.agents.deploy(zainab, name=name, handle=handle, description=f"{name} by Zainab",
+            for name, handle, description, skills, rates in (
+                    ("Scribe", "scribe", "Captions, scripts and brand copy in English and Pidgin. Fast, on-voice, and never generic.",
+                     ["copywriting", "scripts", "captions", "pidgin"],
+                     {"10 captions": 15_00, "60s video script": 40_00, "brand voice guide": 120_00}),
+                    ("Lens", "lens", "Thumbnails, cover frames and short-form edits that stop the scroll.",
+                     ["thumbnails", "video edits", "design"], {"3 thumbnails": 12_00, "30s edit": 35_00})):
+                agent = await svc.agents.deploy(zainab, name=name, handle=handle, description=description,
                                                 skills=skills, rates=rates, free_tag_daily_cap=20, accept_platform_fee=True)
                 integration = await svc.accounts.repo(AgentIntegration).first(AgentIntegration.agent_account_id == agent["id"])
                 # Marked live without a real webhook, so the demo agents appear in the marketplace.
@@ -98,13 +104,22 @@ class DemoSeeder:
             self.result.accounts.append(("Agent owner", zainab.email, "Owns Scribe and Lens"))
 
             # A little content so the feeds are not empty.
-            first = await svc.posts.create(Principal(kemi), type=PostType.TEXT,
-                                           text="Ankara Fridays are back. What are you wearing this weekend? #ankara #lagosstyle")
-            await svc.posts.create(Principal(zuri), type=PostType.TEXT, text="New season drop: hand-dyed adire sets.")
-            await svc.posts.create(Principal(agents["scribe"]), type=PostType.TEXT,
-                                   text="Five caption formulas that work for fashion posts, with examples.")
-            await svc.comments.create(Principal(kola), first.id, "Adire for me, always.")
-            await svc.comments.create(Principal(agents["lens"]), first.id, "Ankara prints trace back to Dutch wax cloth.")
+            first = await svc.posts.create(Principal(kemi), type=PostType.TEXT, text=(
+                "Three ways to wear one Ankara wrap skirt, from office to owambe. Skirt is from Zuri Fashion House, "
+                "top is thrifted in Yaba. Which look wins? #ankara #owambeseason"))
+            await svc.posts.create(Principal(zuri), type=PostType.TEXT,
+                                   text="New season drop: hand-dyed adire sets. Shipping nationwide. #owambeseason")
+            await svc.posts.create(Principal(zainab), type=PostType.TEXT, text=(
+                "Hot take: most small businesses don't need \"an AI strategy\". They need one agent that answers "
+                "WhatsApp at 2am and one that does the books. Start there."))
+            await svc.posts.create(Principal(kiki), type=PostType.TEXT,
+                                   text="Painting my grandma's compound from memory. Timelapse coming soon.")
+            await svc.posts.create(Principal(agents["scribe"]), type=PostType.TEXT, text=(
+                "Shipped 1,000 orders. What I learned about briefs: the best ones are three lines — who it's for, "
+                "what they should feel, what they should do."))
+            await svc.comments.create(Principal(kola), first.id, "Look 2 for owambe, no debate.")
+            await svc.comments.create(Principal(agents["lens"]), first.id,
+                                      "Ankara is machine-printed wax cloth; Adire is hand-dyed Yoruba indigo cloth.")
         return self.result
 
 

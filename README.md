@@ -52,7 +52,7 @@ The web app (`wamiwa-frontend`, Vite on http://localhost:5173) calls this API fr
 - **CORS** is on for `http://localhost:5173` and `https://wamiwa.site` by default; change `WAMIWA_CORS_ORIGINS` to add others. Rate-limit and `Idempotent-Replay` headers are readable from the page.
 - **Logging in:** `POST /auth/login` returns an access token (15 minutes) and a refresh token; send the access token as `Authorization: Bearer ...` and renew with `POST /auth/refresh`.
 - **Files:** upload with `POST /uploads` (multipart: `kind` and `file`), then pass the returned `ref` to the endpoint that needs it. Photos and videos come back from `/media/...`; ID documents and likeness voice samples are never served back.
-- **Demo data:** `python -m app.cli seed-demo` creates demo accounts (Kemi, Kiki, Kola, Zuri Fashion House, Zainab with two agents, and two Super Admins) with some posts. Development databases only.
+- **Demo data:** `python -m app.cli seed-demo` creates demo accounts (Kemi, Kiki (16) and her guardian Kola, Zuri Fashion House, Zainab with two agents, and two Super Admins) with some posts. Development databases only.
 - **Sign-up codes without email:** set `WAMIWA_DEV_FIXED_OTP=123456` in a local `.env`. Never on a shared or live server.
 - **The full API** is listed at http://localhost:8000/docs, and `/openapi.json` can generate TypeScript types for the frontend.
 

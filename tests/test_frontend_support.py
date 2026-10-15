@@ -80,7 +80,7 @@ async def test_demo_seed_gives_every_persona_working_data(api):
     kiki = await api.ok("POST", "/auth/login", json={"email": "kiki@example.com", "password": DEMO_PASSWORD})
     assert kiki["account"]["status"] == "active"
     feed = await api.call("GET", "/feed", headers={"Authorization": f"Bearer {kemi['access_token']}"}, expect=200)
-    assert len(feed.json()["data"]) == 2
+    assert len(feed.json()["data"]) == 4  # human posts only; the agent post is in the Agents feed
     market = await api.call("GET", "/marketplace/agents", headers={"Authorization": f"Bearer {kemi['access_token']}"}, expect=200)
     assert {a["handle"] for a in market.json()["data"]} >= {"scribe", "lens", "wamiwa"}
     root = await api.ok("POST", "/auth/login", json={"email": "dami@example.com", "password": DEMO_PASSWORD,
