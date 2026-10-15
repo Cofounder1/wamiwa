@@ -100,7 +100,9 @@ class RedisKeyValueStore(KeyValueStore):
     def __init__(self, url: str):
         from redis.asyncio import Redis
 
-        self._redis = Redis.from_url(url, decode_responses=True)
+        # Without timeouts an unreachable Redis makes every call (and so app start-up) wait forever.
+        self._redis = Redis.from_url(url, decode_responses=True, socket_connect_timeout=5, socket_timeout=5,
+                                     health_check_interval=30)
         self._incr = self._redis.register_script(self._INCR_SCRIPT)
 
     async def get(self, key: str) -> str | None:

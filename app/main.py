@@ -62,11 +62,15 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
     async def lifespan(_app: FastAPI):
         if not settings.is_production:
             await infra.db.create_all()  # production schema changes go through migrations
-        try:  # the first-party Wamiwa Agent should be in the marketplace from the start
+        async def create_agent() -> None:
             async with infra.db.unit_of_work() as uow:
                 await ServiceContext(infra, uow).services.promos.ensure_agent()
+
+        try:  # the first-party Wamiwa Agent should be in the marketplace from the start
+            # Bounded, because the port only opens once start-up finishes; a slow database must not keep it shut.
+            await asyncio.wait_for(create_agent(), timeout=20)
         except Exception:  # noqa: BLE001 - e.g. migrations not applied yet; it is created on first use anyway
-            log.warning("could not create the Wamiwa Agent at startup")
+            log.warning("could not create the Wamiwa Agent at startup", exc_info=True)
         if settings.run_jobs:
             runner.start()
         yield
