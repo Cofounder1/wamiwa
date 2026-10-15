@@ -9,7 +9,7 @@ from functools import cached_property
 
 from app.services import (
     accounts, admin, agents, auth, company, content, contracts, disputes, likeness, messaging,
-    notifications, payments, promos, queues, social, support, trust, verification, video,
+    emails, notifications, payments, promos, queues, social, support, trust, verification, video,
 )
 from app.services.base import ServiceContext
 
@@ -30,6 +30,10 @@ class ServiceRegistry:
     @cached_property
     def queues(self) -> queues.QueueService:
         return queues.QueueService(self._ctx)
+
+    @cached_property
+    def welcome(self) -> emails.WelcomeEmailService:
+        return emails.WelcomeEmailService(self._ctx)
 
     @cached_property
     def admin(self) -> admin.AdminService:

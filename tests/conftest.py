@@ -1,11 +1,14 @@
 """Test harness: an in-memory app with a frozen clock, sandbox providers and a fake agent webhook."""
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
 import pytest
+from sqlalchemy import event, text
+from sqlalchemy.orm import Session
 
 from app.container import build_infrastructure, build_providers
 from app.core.config import Settings
@@ -15,6 +18,7 @@ from app.infra.providers.base import WebhookResponse, WebhookTransport
 from app.jobs.runner import JobRunner
 from app.main import create_app
 from app.models import Account
+from app.models.base import Base
 from app.services.base import ServiceContext
 
 ADULT_DOB = "1990-05-01"
@@ -189,9 +193,51 @@ class Api:
             "Content-Type": "application/json"}}
 
 
+# Set WAMIWA_TEST_ON_POSTGRES=1 to run the suite against the database in .env instead of in-memory SQLite.
+# Tests then live in their own schema, so the real tables in "public" are never touched.
+ON_POSTGRES = os.environ.get("WAMIWA_TEST_ON_POSTGRES") == "1"
+TEST_SCHEMA = "wamiwa_test"
+_schema_ready = False
+
+
+async def prepare_postgres(infra) -> None:
+    """Create the test schema and tables once, then empty every table before each test."""
+    global _schema_ready
+    async with infra.db.engine.begin() as conn:
+        if not _schema_ready:
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{TEST_SCHEMA}"'))
+            await conn.execute(text(f'SET search_path TO "{TEST_SCHEMA}"'))
+            await conn.run_sync(Base.metadata.create_all)
+            _schema_ready = True
+        tables = ", ".join(f'"{TEST_SCHEMA}"."{t.name}"' for t in Base.metadata.sorted_tables)
+        await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+
+
+_sized_columns: dict[type, list[tuple[str, str, int]]] = {}
+
+
+@event.listens_for(Session, "before_flush")
+def enforce_column_lengths(session, _flush_context, _instances) -> None:
+    """SQLite ignores VARCHAR lengths; Postgres does not. Fail here, in the fast local run, on any value
+    that would be rejected in production."""
+    for obj in list(session.new) + list(session.dirty):
+        cls = type(obj)
+        if cls not in _sized_columns:
+            _sized_columns[cls] = [(attr.key, column.name, column.type.length)
+                                   for attr in cls.__mapper__.column_attrs for column in attr.columns
+                                   if getattr(column.type, "length", None)]
+        for key, name, length in _sized_columns[cls]:
+            value = obj.__dict__.get(key)
+            if isinstance(value, str) and len(value) > length:
+                raise AssertionError(f"{cls.__name__}.{name} is {len(value)} characters; the column holds {length}")
+
+
 def make_settings(**overrides) -> Settings:
+    if ON_POSTGRES:
+        overrides = {"database_url": Settings().database_url, "database_schema": TEST_SCHEMA,
+                     "database_pool_size": 2, "database_max_overflow": 2} | overrides
     defaults = dict(
-        database_url="sqlite+aiosqlite:///:memory:", run_jobs=False, deliver_webhooks_inline=True,
+        database_url="sqlite+aiosqlite:///:memory:", run_jobs=False, email_provider="sandbox", deliver_webhooks_inline=True,
         allow_private_webhook_urls=True, anonymous_requests_per_minute=10_000, human_reads_per_minute=10_000,
         human_writes_per_minute=10_000, machine_reads_per_minute=10_000, machine_writes_per_minute=10_000,
         logins_per_hour=1000, access_token_ttl_seconds=10 * 365 * 86400)
@@ -205,7 +251,10 @@ async def build_api(**overrides):
     providers = build_providers(settings)
     providers.webhooks = endpoint
     infra = build_infrastructure(settings, clock=clock, providers=providers)
-    await infra.db.create_all()
+    if ON_POSTGRES:
+        await prepare_postgres(infra)
+    else:
+        await infra.db.create_all()
     app = create_app(settings, infra)
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
     return Api(client, infra, endpoint)

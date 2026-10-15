@@ -12,9 +12,12 @@ class Settings(BaseSettings):
     env: str = "development"
     debug: bool = False
     app_name: str = "Wamiwa API"
-    public_base_url: str = "https://www.wamiwa.com"
+    public_base_url: str = "https://wamiwa.site"
 
     database_url: str = "sqlite+aiosqlite:///./wamiwa.db"
+    database_pool_size: int = 5  # steady connections per worker; hosted poolers cap the total per plan
+    database_max_overflow: int = 5  # extra connections allowed at busy moments
+    database_schema: str | None = None  # Postgres only: keep the tables in a schema other than "public"
     redis_url: str | None = None  # falls back to an in-process store when unset (single worker only)
     run_jobs: bool = True  # run the in-process scheduler; disable on all but one worker
 
@@ -37,8 +40,11 @@ class Settings(BaseSettings):
     korapay_public_key: str | None = None
     heygen_api_key: str | None = None
     sms_voice_api_key: str | None = None  # vendor to choose
-    email_api_key: str | None = None  # vendor to choose
-    email_from_address: str = "no-reply@wamiwa.com"
+    email_provider: str = "sandbox"  # "resend" sends real email; "sandbox" only records it (development, tests)
+    email_api_key: str | None = None  # Resend API key
+    email_from_address: str = "no-reply@wamiwa.site"  # its domain must be verified in Resend
+    email_from_name: str = "Wamiwa"
+    email_reply_to: str | None = "info@wamiwa.site"  # where replies to Wamiwa's emails land
     moderation_api_key: str | None = None  # vendor to choose
     watermark_api_key: str | None = None  # vendor to choose
     fx_api_key: str | None = None  # live USD -> NGN rate source, to choose

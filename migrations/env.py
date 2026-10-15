@@ -24,7 +24,7 @@ import app.models  # noqa: F401  (registers every table)
 from app.core.config import get_settings
 from app.models.base import Base
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

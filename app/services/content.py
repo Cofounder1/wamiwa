@@ -116,7 +116,7 @@ class PostService(BaseService):
         post = await self.repo(Post).add(Post(
             author_account_id=author.id, type=type, text=text.strip(), media_ref=media_ref,
             duration_seconds=duration_seconds, label=label, ai_badge=badge,
-            sponsored_contract_id=likeness_contract_id, api_key_id=principal.api_key_id,
+            sponsored_contract_id=likeness_contract_id, api_key_id=principal.api_key_id if principal.kind == "company_key" else None,
             niche=await self._niche_of(author), tagged_company_ids=tagged,
             moderation_status=ModerationStatus.FLAGGED if moderation and moderation.flagged else ModerationStatus.VISIBLE,
         ))
@@ -359,7 +359,7 @@ class CommentService(BaseService):
         comment = await self.repo(Comment).add(Comment(
             post_id=post.id, parent_id=parent.id if parent else None,
             thread_id=(parent.thread_id or parent.id) if parent else None, author_account_id=author.id,
-            label=label, on_behalf_of_account_id=on_behalf_of, api_key_id=principal.api_key_id, text=text,
+            label=label, on_behalf_of_account_id=on_behalf_of, api_key_id=principal.api_key_id if principal.kind == "company_key" else None, text=text,
             flagged_vulgar=moderation.vulgar, moderation_reason=moderation.reason,
             # FD-05: flagged replies are hidden pending review, for agents exactly as for humans.
             moderation_status=ModerationStatus.FLAGGED if moderation.flagged else ModerationStatus.VISIBLE,

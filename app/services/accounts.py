@@ -285,6 +285,7 @@ class GuardianService(BaseService):
         minor = await self.repo(Account).require(link.minor_account_id)
         if minor.status == AccountStatus.PENDING_GUARDIAN:
             minor.status = AccountStatus.ACTIVE
+            await self.svc.welcome.send(minor, minor=True)
         await self.svc.notifications.notify(minor.id, NotificationType.SECURITY, "Your guardian is linked",
                                             "Your account is ready to use.")
 

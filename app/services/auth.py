@@ -121,6 +121,8 @@ class AuthService(BaseService):
                 account_id=account.id, business_name=name.strip(), category=category))
 
         result = await self._session(account)
+        if not is_minor:  # a minor's welcome waits until the guardian is linked
+            await self.svc.welcome.send(account)
         if is_minor:
             result["next_step"] = "link_guardian"
             result["hint"] = "Signup finishes once a parent or guardian links and verifies their account."

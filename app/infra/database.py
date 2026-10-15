@@ -9,18 +9,27 @@ from app.models.base import Base
 
 
 class Database:
-    def __init__(self, url: str, echo: bool = False):
+    def __init__(self, url: str, echo: bool = False, pool_size: int = 5, max_overflow: int = 5,
+                 schema: str | None = None):
         kwargs: dict = {"echo": echo}
+        self._schema = schema if schema and not url.startswith("sqlite") else None
         if url.startswith("sqlite"):
             kwargs["connect_args"] = {"check_same_thread": False}
             if ":memory:" in url:
                 kwargs["poolclass"] = StaticPool  # one shared connection keeps the in-memory DB alive
         else:
-            kwargs.update(pool_size=10, max_overflow=20, pool_pre_ping=True)
+            kwargs.update(pool_size=pool_size, max_overflow=max_overflow, pool_pre_ping=True)
         self.engine: AsyncEngine = create_async_engine(url, **kwargs)
         if url.startswith("sqlite"):
             event.listen(self.engine.sync_engine, "connect", self._sqlite_pragmas)
+        elif self._schema:
+            event.listen(self.engine.sync_engine, "connect", self._use_schema)
         self._sessionmaker = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    def _use_schema(self, dbapi_connection, _record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute(f'SET search_path TO "{self._schema}"')
+        cursor.close()
 
     @staticmethod
     def _sqlite_pragmas(dbapi_connection, _record) -> None:

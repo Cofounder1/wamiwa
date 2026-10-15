@@ -195,3 +195,33 @@ async def test_general_rate_limit_headers_and_429():
     finally:
         await api.client.aclose()
         await api.infra.db.dispose()
+
+
+async def test_welcome_email_from_the_founder(api):
+    outbox = api.infra.providers.email.outbox
+
+    def welcome_for(address):
+        return [m for m in outbox if m["to"] == address and m["subject"] == "Welcome to Wamiwa"]
+
+    await api.signup("ada", name="Ada Obi")
+    [mail] = welcome_for("ada@example.com")
+    assert mail["body"].startswith("Hi Ada,") and "Damilola Oladimeji\nFounder & CEO, Wamiwa" in mail["body"]
+    assert "just reply" in mail["body"]
+
+    admin = await api.admin()
+    await api.company("acme", admin)
+    [company_mail] = welcome_for("acme@example.com")
+    assert company_mail["body"].startswith("Hi Acme Ltd team,") and "verify your business" in company_mail["body"]
+
+    # A 13-17 account is only welcomed once a guardian has linked and been verified.
+    minor = await api.signup("teen", dob="2011-06-01", name="Teen Obi")
+    assert welcome_for("teen@example.com") == []
+    await api.ok("POST", "/guardians/invite", minor, json={"contact": "mum@example.com"})
+    token = api.infra.providers.email.last_for("mum@example.com")["body"].split("token=")[1]
+    guardian = await api.signup("mum", name="Ngozi Obi")
+    await api.ok("POST", "/guardians/accept", guardian, json={"token": token, "relationship": "mother", "confirm_relationship": True})
+    assert welcome_for("teen@example.com") == []
+    await api.verify_id(guardian, "Ngozi Obi")
+    [teen_mail] = welcome_for("teen@example.com")
+    assert teen_mail["body"].startswith("Hi Teen,") and "guardian has linked" in teen_mail["body"]
+    assert len(welcome_for("mum@example.com")) == 1  # the guardian got their own, once

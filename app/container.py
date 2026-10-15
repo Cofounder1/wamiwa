@@ -5,6 +5,8 @@ from app.core.utils import Clock, set_default_clock
 from app.infra.cache import CacheService
 from app.infra.database import Database
 from app.infra.kv import InMemoryKeyValueStore, KeyValueStore, RedisKeyValueStore
+from app.infra.providers.base import EmailGateway
+from app.infra.providers.resend import ResendEmailGateway
 from app.infra.providers.sandbox import (
     HttpxWebhookTransport, SandboxEmailGateway, SandboxLinkSafetyGateway, SandboxMusicCatalogGateway, SandboxTrendGateway, SandboxIdentityGateway, SandboxModerationGateway,
     SandboxPaymentGateway, SandboxSmsGateway, SandboxSocialGateway, SandboxVideoGateway,
@@ -12,6 +14,16 @@ from app.infra.providers.sandbox import (
 )
 from app.infra.rate_limit import RateLimiter, RateLimitPolicies
 from app.services.base import Infrastructure, Providers
+
+
+def build_email(settings: Settings) -> EmailGateway:
+    """Real email only when it is asked for by name and a key is present; otherwise nothing leaves the machine."""
+    if settings.email_provider == "resend":
+        if not settings.email_api_key:
+            raise RuntimeError("WAMIWA_EMAIL_PROVIDER=resend needs WAMIWA_EMAIL_API_KEY")
+        return ResendEmailGateway(settings.email_api_key, settings.email_from_address, settings.email_from_name,
+                                  reply_to=settings.email_reply_to)
+    return SandboxEmailGateway()
 
 
 def build_providers(settings: Settings) -> Providers:
@@ -26,7 +38,7 @@ def build_providers(settings: Settings) -> Providers:
         fx=StaticFxRateProvider({("USD", settings.local_currency): settings.sandbox_fx_rate}),
         video=SandboxVideoGateway(),
         watermark=SandboxWatermarkGateway(),
-        email=SandboxEmailGateway(),
+        email=build_email(settings),
         sms=SandboxSmsGateway(),
         voice=SandboxVoiceGateway(),
         moderation=SandboxModerationGateway(),
@@ -47,7 +59,8 @@ def build_infrastructure(settings: Settings, *, clock: Clock | None = None, kv: 
     return Infrastructure(
         settings=settings,
         clock=clock,
-        db=Database(settings.database_url, echo=False),
+        db=Database(settings.database_url, echo=False, pool_size=settings.database_pool_size,
+                    max_overflow=settings.database_max_overflow, schema=settings.database_schema),
         kv=kv,
         cache=CacheService(kv),
         limiter=RateLimiter(kv, clock),

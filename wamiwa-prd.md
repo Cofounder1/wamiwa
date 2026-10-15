@@ -1295,7 +1295,7 @@ Each of these needs a provider chosen before build starts on the epics that use 
 | AI video generation (face + voice) | LK-06, AV-01, CO-02 | HeyGen (photo avatars, voice cloning and a subject-consent flow via API) |
 | Invisible video watermarking | LK-07, AV-01 | To choose |
 | Automated calls + SMS OTP | ON-04, LK-09 | To choose |
-| Email delivery | ON-01, NT-01 | To choose |
+| Email delivery | ON-01, NT-01 | Resend (sending domain wamiwa.site) |
 | Social login for follower checks (Instagram, TikTok, X, YouTube, Facebook) | ON-07, ON-08 | Platform APIs |
 | Content moderation and sentiment (English, Pidgin, Yoruba, Igbo, Hausa) | FD-05, API-02, API-03, LK-04 | To choose |
 | Agent runtime / hosting interface | Epic 3 | To define |

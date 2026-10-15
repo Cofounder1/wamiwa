@@ -88,7 +88,9 @@ the database.
 
 ## Third parties
 
-Services depend on the interfaces in `app/infra/providers/base.py`. Today every one is wired to a
+Email is connected to Resend (`WAMIWA_EMAIL_PROVIDER=resend` plus the key; tests always use the stand-in).
+
+Services depend on the interfaces in `app/infra/providers/base.py`. Every other one is wired to a
 deterministic sandbox adapter (`sandbox.py`), which is what makes the whole flow testable offline. Going
 live with YouVerify, Korapay, HeyGen and the still-unchosen SMS/voice, email, watermark and moderation
 vendors means writing one adapter class each and returning it from `app/container.py`.
