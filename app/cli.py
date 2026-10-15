@@ -3,6 +3,7 @@
     python -m app.cli create-super-admin <email> <handle>   # prompts for a password; run for two people
     python -m app.cli run-job <job name>                    # e.g. payouts.run_cycle
     python -m app.cli list-jobs
+    python -m app.cli run-scheduler                         # runs every job on its interval until stopped
     python -m app.cli seed-demo                             # development only: demo accounts for the frontend
 """
 import asyncio
@@ -35,6 +36,19 @@ async def run_job(name: str) -> None:
     await infra.db.dispose()
 
 
+async def run_scheduler() -> None:
+    """The worker process: runs due jobs every 30 seconds, for when the API runs with WAMIWA_RUN_JOBS=false."""
+    infra = build_infrastructure(get_settings())
+    runner = JobRunner(infra)
+    runner.start()
+    try:
+        await asyncio.Event().wait()  # until the process is stopped
+    finally:
+        await runner.stop()
+        await infra.kv.close()
+        await infra.db.dispose()
+
+
 async def seed_demo() -> None:
     from app.demo_seed import DEMO_PASSWORD, seed
 
@@ -52,6 +66,11 @@ def main(argv: list[str]) -> None:
         asyncio.run(create_super_admin(argv[1], argv[2]))
     elif len(argv) == 2 and argv[0] == "run-job":
         asyncio.run(run_job(argv[1]))
+    elif argv == ["run-scheduler"]:
+        try:
+            asyncio.run(run_scheduler())
+        except KeyboardInterrupt:
+            pass
     elif argv == ["seed-demo"]:
         asyncio.run(seed_demo())
     elif argv == ["list-jobs"]:

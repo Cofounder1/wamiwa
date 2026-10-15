@@ -10,12 +10,32 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env
 .venv/bin/uvicorn app.main:app_factory --factory --reload     # http://localhost:8000/docs
 .venv/bin/python -m app.cli create-super-admin you@company.com yourhandle   # run for two people
-.venv/bin/python -m pytest                                    # 66 end-to-end tests
+.venv/bin/python -m pytest                                    # 67 end-to-end tests
 ```
 
 Development uses SQLite and an in-process key-value store, so nothing else needs installing.
 Production needs Postgres and Redis (`WAMIWA_DATABASE_URL`, `WAMIWA_REDIS_URL`), real secrets, and
 `alembic upgrade head`; the app refuses to start in production with default secrets or without Redis.
+
+## Run with Docker
+
+```bash
+docker compose up --build                                       # http://localhost:8000/docs
+docker compose exec api python -m app.cli seed-demo             # demo accounts, local database only
+docker compose exec api python -m app.cli create-super-admin you@company.com yourhandle
+docker compose down                                             # stop; add -v to also delete the data
+```
+
+This starts four containers: the API, a worker that runs the scheduled jobs, Redis, and a local
+Postgres 17. The API applies migrations each time it starts. Your `.env` supplies keys, but Docker
+overrides the database, Redis and email settings, so it never touches Supabase and never sends
+real email: emails are recorded only, and every sign-up code is `123456`. To send real email from
+Docker, change `WAMIWA_EMAIL_PROVIDER` in `docker-compose.yml` to `resend`. The local database is
+reachable from your Mac on port 5433 (user, password and database all `wamiwa`).
+
+The same image runs in production: set `WAMIWA_ENV=production` and the real settings, run one
+container with the default command, and one with `python -m app.cli run-scheduler`, with
+`WAMIWA_RUN_JOBS=false` on the API containers.
 
 ## Layout
 
@@ -117,6 +137,7 @@ vendors means writing one adapter class each and returning it from `app/containe
 
 ## Jobs
 
-`python -m app.cli list-jobs` shows all 27. They run in-process (`WAMIWA_RUN_JOBS=true`) under a Redis
-lock per job, so several API workers do not double-run them. Run one by hand with
+`python -m app.cli list-jobs` shows all 31. They run in-process (`WAMIWA_RUN_JOBS=true`) under a Redis
+lock per job, so several API workers do not double-run them. To run them in a separate worker
+instead, set `WAMIWA_RUN_JOBS=false` on the API and run `python -m app.cli run-scheduler`. Run one by hand with
 `python -m app.cli run-job payouts.run_cycle`.

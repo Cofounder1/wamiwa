@@ -1,0 +1,79 @@
+# Local development: the API, the scheduled-jobs worker, Redis and a local Postgres.
+#   docker compose up --build        then open http://localhost:8000/docs
+# Your .env is read for keys, but the database, Redis and email settings below override it,
+# so nothing here touches Supabase or sends real email.
+
+x-wamiwa: &wamiwa
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment: &wamiwa-env
+    WAMIWA_ENV: development
+    WAMIWA_DATABASE_URL: postgresql+asyncpg://wamiwa:wamiwa@postgres:5432/wamiwa
+    WAMIWA_DATABASE_SCHEMA: ""
+    WAMIWA_REDIS_URL: redis://redis:6379/0
+    WAMIWA_EMAIL_PROVIDER: sandbox  # change to resend to send real email from Docker
+    WAMIWA_DEV_FIXED_OTP: "123456"  # every sign-up code is 123456, since email is not sent
+  volumes:
+    - uploads:/app/uploads
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *wamiwa
+    environment:
+      <<: *wamiwa-env
+      WAMIWA_RUN_JOBS: "false"  # the worker runs the jobs
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *wamiwa
+    command: ["python", "-m", "app.cli", "run-scheduler"]
+    environment:
+      <<: *wamiwa-env
+    healthcheck:
+      disable: true
+    depends_on:
+      api:
+        condition: service_healthy  # the API container applies migrations first
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: wamiwa
+      POSTGRES_PASSWORD: wamiwa  # local only; never reachable from outside this machine
+      POSTGRES_DB: wamiwa
+    ports:
+      - "127.0.0.1:5433:5432"  # for a database tool on your Mac; 5433 avoids clashing with a local Postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wamiwa -d wamiwa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads:

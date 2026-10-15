@@ -460,3 +460,12 @@ async def test_out_of_sync_renders_are_redone_free_and_never_delivered(api):
     assert failed["status"] == "failed" and failed["file"] is None and failed["counter"]["finals_left"] == 2
     assert (await api.ok("GET", f"/likeness/contracts/{cid}/videos", influencer))["videos"] == [] or all(
         v["status"] == "failed" for v in (await api.ok("GET", f"/likeness/contracts/{cid}/videos", influencer))["videos"])
+
+
+async def test_offer_deadline_without_timezone_is_read_as_utc(api):
+    """A plain date from a date picker must not crash the offer endpoint (it used to raise a 500)."""
+    from app.api.routers.hiring import OfferIn
+
+    offer = OfferIn(influencer_id="x", price_cents=100, deliverables="one post", deadline="2030-01-15", num_posts=1,
+                    payment_method="tok_visa")
+    assert offer.deadline.tzinfo is not None and offer.deadline.isoformat().startswith("2030-01-15T00:00:00")

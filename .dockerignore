@@ -1,0 +1,20 @@
+# Secrets and local state never go into the image.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+uploads/
+.git/
+.gitignore
+tests/
+docs/
+*.md
+Dockerfile
+docker-compose.yml

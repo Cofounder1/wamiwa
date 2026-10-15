@@ -1,9 +1,9 @@
 """Hire Me (Epic 4), Hire My Likeness (Epic 5), contracts, video generation and disputes."""
-from datetime import datetime
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
 from app.api.deps import Active, Services, ok, ok_page
 from app.core.enums import (
@@ -30,11 +30,19 @@ class AvailabilityIn(BaseModel):
     available: bool
 
 
+def _assume_utc(value: datetime) -> datetime:
+    """A deadline sent without a timezone (e.g. a plain date from a date picker) is read as UTC."""
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+Deadline = Annotated[datetime, AfterValidator(_assume_utc)]
+
+
 class OfferIn(BaseModel):
     influencer_id: str
     price_cents: int = Field(gt=0)
     deliverables: str = Field(min_length=3, max_length=5000)
-    deadline: datetime
+    deadline: Deadline
     num_posts: int = Field(ge=1, le=1000)
     no_ai_replies: bool = False
     payment_method: str = PaymentMethod
@@ -50,7 +58,7 @@ class ReleaseIn(BaseModel):
 
 
 class DeadlineIn(BaseModel):
-    new_deadline: datetime
+    new_deadline: Deadline
 
 
 class ReasonIn(BaseModel):
