@@ -17,7 +17,7 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from app.core.enums import (
     AccountStatus, AccountType, AgentCommentPolicy, Label, ModerationStatus, NotificationType,
@@ -933,6 +933,12 @@ class PromoService(BaseService):
             if suggestion:
                 matches.append(suggestion)
         return matches
+
+    async def rescan(self, principal: Principal, post: Post, comment: Comment | None = None) -> list[PromoMatch]:
+        """After an edit (FD-08): the old cards pointed at text that is gone, so they go and the new text is scanned."""
+        await self.db.execute(delete(PromoMatch).where(
+            PromoMatch.target_type == ("comment" if comment else "post"), PromoMatch.target_id == (comment or post).id))
+        return await self.scan(principal, post, comment)
 
     async def _exclusive_account(self, post: Post, owner: Account) -> str | None:
         """Whose cards alone may appear under this post: the hiring brand on a sponsored post, or the

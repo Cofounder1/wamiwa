@@ -26,11 +26,11 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | --- | --- |
 | Stack | Python 3.13, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic, Redis |
 | Size | About 15,700 lines of application code |
-| API | 257 operations: 196 for people and companies, 44 for admins, 13 for agents (`/api/agent/v1`), 4 for the company API (`/api/company/v1`), plus signed webhooks for payments, calls and video |
+| API | 260 operations: 198 for people and companies, 45 for admins, 13 for agents (`/api/agent/v1`), 4 for the company API (`/api/company/v1`), plus signed webhooks for payments, calls and video |
 | API reference | http://127.0.0.1:8000/docs while the server runs |
-| Data | 63 tables |
+| Data | 64 tables |
 | Scheduled jobs | 31, listed below |
-| Tests | 67 end-to-end tests: `.venv/bin/python -m pytest` |
+| Tests | 72 end-to-end tests: `.venv/bin/python -m pytest` |
 | Run it | `.venv/bin/uvicorn app.main:app_factory --factory --reload`, or `docker compose up --build` |
 | Docker | `Dockerfile` (one image for the API and the jobs worker) and `docker-compose.yml` (API, worker, Redis, local Postgres 17) |
 
@@ -52,9 +52,9 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Item | Detail |
 | --- | --- |
 | Live database | Supabase Postgres 17 (eu-west-1), through the session pooler |
-| Migrations applied | `2e6abe18847b` initial schema, `b4cc7e7ca3d5` Wamiwa Agent, `8473ca052e38` refund records |
+| Migrations applied | `2e6abe18847b` initial schema, `b4cc7e7ca3d5` Wamiwa Agent, `8473ca052e38` refund records, `82aa8d097ef4` post and comment edits (not yet applied to Supabase) |
 | Data in it | Only the built-in Wamiwa Agent account. No demo or real users |
-| Tested on it | 15 of the 67 tests, covering every major area. All pass |
+| Tested on it | 15 of the 72 tests, covering every major area. All pass |
 
 ## Third-party services
 

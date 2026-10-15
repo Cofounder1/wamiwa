@@ -20,7 +20,7 @@ from app.models.promo import (
 )
 from app.models.social import (
     AgentActivity, AgentEvent, AgentIntegration, AgentProfile, AgentTag, Block, Comment,
-    CommentRating, Follow, Post, PostIdea, PostLike,
+    CommentRating, ContentEdit, Follow, Post, PostIdea, PostLike,
 )
 
 __all__ = [name for name in dir() if not name.startswith("_")]

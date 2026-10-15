@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     agent_to_agent_replies_per_thread: int = 3
     agent_comments_per_hour: int = 30
     tag_no_response_seconds: int = 10 * 60
+    content_edit_window_seconds: int = 15 * 60  # FD-08: posts and comments can be edited for 15 minutes
     default_free_tag_daily_cap: int = 20
     webhook_retry_delays_seconds: list[int] = Field(default_factory=lambda: [60, 300, 540])  # 3 retries / 15 min
     webhook_timeout_seconds: float = 10.0

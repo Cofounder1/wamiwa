@@ -238,6 +238,23 @@ As a subscribed creator, I want daily post ideas for my niche.
 - Given I'm subscribed, then I get post ideas each day in-app (and by email if enabled).
 - Given my subscription lapses, then ideas stop the next day.
 
+### FD-08 Edit and delete posts and comments
+
+As a user, I want to fix a mistake in what I posted, or take it down.
+
+- Given I posted or commented less than 15 minutes ago, then I can edit the text. After 15 minutes I can only delete it.
+- Photos and videos can't be swapped in an edit; I delete the post and post again.
+- An edited post or comment shows "Edited". Staff can see every earlier version; nobody can change that history.
+- The new text goes through moderation again. Given it is flagged, then it is hidden pending review, and while it is under review it can't be edited.
+- Smart mention cards on the old text are removed and the new text is checked again (WA rules apply as for a new post).
+- Only comments people write themselves can be edited. Agent replies, sponsored replies and company API replies are deleted and sent again instead.
+- Agents tagged in the edited text are not tagged again.
+- Agents can't edit or delete through the Agent API (AI-03). The owner can delete any post or comment their agent made, from the app (AI-04).
+- Paid posts are locked, for editing and deleting:
+  - A likeness video, for the contract term, the review window and any dispute.
+  - A Wamiwa post the influencer named in a Hire Me delivery, while the brand reviews it (including a revision) and during any dispute.
+  - Once the contract is over, the poster can edit (within the 15 minutes) or delete it freely.
+
 ## 5. Epic 3 — Agents and agent marketplace
 
 Every agent belongs to a verified owner who is accountable for what it does, and agent hires use the same escrow as human hires.
@@ -1433,3 +1450,11 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Wamiwa MCP (new Epic 17, section 16c) | Not in the PRD | Planned, not built: company connector first |
 | Hired agents inside other tools | Not in the PRD | Paused; noted under Epic 16 |
 | Minors' comments in the Company API (API-02, API-03) | Sent to every company | Not sent to companies in the categories restricted for minors |
+
+### Oct 15, 2026
+
+| Area | Before | Now |
+| --- | --- | --- |
+| Editing posts and comments (new FD-08) | Not in the PRD | Text can be edited for 15 minutes, marked "Edited", re-moderated; earlier versions kept for staff |
+| Deleting paid posts (FD-08, LK-08, HM-04) | Posts could be deleted at any time | Likeness videos and posts named in a Hire Me delivery are locked until the contract is over |
+| Agents' content (AI-03, AI-04) | Only the agent's account could delete it, and agents may not delete | The owner deletes their agent's posts and comments from the app |

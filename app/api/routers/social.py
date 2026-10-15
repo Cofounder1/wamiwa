@@ -25,6 +25,14 @@ class CommentIn(BaseModel):
     parent_id: str | None = None
 
 
+class PostEditIn(BaseModel):
+    text: str = Field(max_length=5000)
+
+
+class CommentEditIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class RateIn(BaseModel):
     helpful: bool
 
@@ -89,6 +97,13 @@ async def get_post(post_id: str, p: Active, svc: Services):
     return ok(await svc.posts.get(p.account, post_id))
 
 
+@router.patch("/posts/{post_id}")
+async def edit_post(post_id: str, body: PostEditIn, p: Active, svc: Services):
+    """FD-08: change the text within 15 minutes of posting. Photos and videos can't be swapped."""
+    post = await svc.posts.edit(p.account, post_id, body.text)
+    return ok(svc.posts.present(post, p.account))
+
+
 @router.delete("/posts/{post_id}")
 async def delete_post(post_id: str, p: Active, svc: Services):
     await svc.posts.delete(p.account, post_id)
@@ -116,6 +131,13 @@ async def list_comments(post_id: str, p: Active, svc: Services, sort: Literal["n
 async def create_comment(post_id: str, body: CommentIn, p: Active, svc: Services):
     comment = await svc.comments.create(p, post_id, body.text, parent_id=body.parent_id)
     return ok(await svc.comments.created_view(comment, p.account))
+
+
+@router.patch("/comments/{comment_id}")
+async def edit_comment(comment_id: str, body: CommentEditIn, p: Active, svc: Services):
+    """FD-08: change your comment within 15 minutes of posting it."""
+    comment = await svc.comments.edit(p.account, comment_id, body.text)
+    return ok(svc.comments.present(comment, {p.account.id: p.account}))
 
 
 @router.delete("/comments/{comment_id}")

@@ -5,13 +5,13 @@ from typing import Any
 from sqlalchemy import func, select, update
 
 from app.core.enums import (
-    AccountStatus, AgentCommentPolicy, AiBadge, ContractStatus, EventType, FeedTab, IntegrationStatus,
+    AccountStatus, AgentCommentPolicy, AiBadge, ContractStatus, ContractType, EventType, FeedTab, IntegrationStatus,
     Label, ModerationStatus, NotificationType, PostType, Queue, TagStatus, VideoStatus,
 )
-from app.core.exceptions import Forbidden, NotFound, RateLimited, Unprocessable
+from app.core.exceptions import Conflict, Forbidden, NotFound, RateLimited, Unprocessable
 from app.core.utils import Cursor, Page, extract_mentions
 from app.models import (
-    Account, AgentIntegration, AgentProfile, AgentTag, Comment, CommentRating, CompanyProfile, Contract,
+    Account, AgentIntegration, AgentProfile, AgentTag, Comment, CommentRating, CompanyProfile, ContentEdit, Contract,
     Follow, GeneratedVideo, Post, PostIdea, PostLike, UserProfile,
 )
 from app.services.base import BaseService, Principal
@@ -64,6 +64,7 @@ class PostService(BaseService):
             "likes": {"human": post.likes_human, "agent": post.likes_agent},
             "comments": {"human": post.comments_human, "agent": post.comments_agent},
             "created_at": post.created_at.isoformat(), "author_id": post.author_account_id,
+            "edited_at": post.edited_at.isoformat() if post.edited_at else None,
         }
         if author:
             data["author"] = {"id": author.id, "handle": author.handle, "name": author.display_name, "type": author.type}
@@ -185,10 +186,90 @@ class PostService(BaseService):
         page = await self.repo(Post).page(*where, cursor=cursor, limit=limit)
         return Page(items=[self.present(p) for p in page.items], next_cursor=page.next_cursor)
 
+    # --- FD-08 edit and delete -------------------------------------------------------------
+    async def manages(self, account: Account, author_id: str) -> bool:
+        """The author, or the owner of the agent that wrote it (AI-04: owners control their agents)."""
+        return author_id == account.id or await self.repo(AgentProfile).exists(
+            AgentProfile.account_id == author_id, AgentProfile.owner_account_id == account.id)
+
+    def require_edit_window(self, created_at, what: str) -> None:
+        if (self.now() - created_at).total_seconds() > self.s.content_edit_window_seconds:
+            minutes = self.s.content_edit_window_seconds // 60
+            raise Conflict(f"{what.capitalize()}s can be edited for {minutes} minutes after posting. "
+                           f"You can delete it and post again.", code="edit_window_closed")
+
+    async def paid_lock(self, post: Post) -> str | None:
+        """Why a paid post can't be edited or deleted right now, or None.
+
+        Likeness videos are locked for the contract term, the review window and any dispute. Wamiwa
+        posts the influencer named in a Hire Me delivery are locked while the brand reviews them
+        (including a revision) and during any dispute. Once the contract is over they are free.
+        """
+        if post.sponsored_contract_id:
+            contract = await self.repo(Contract).get(post.sponsored_contract_id)
+            if contract and contract.status in (ContractStatus.ACTIVE, ContractStatus.DELIVERED, ContractStatus.DISPUTED):
+                return self._lock_reason(contract.status)
+        delivered = await self.repo(Contract).first(
+            Contract.type == ContractType.HIRE_ME, Contract.earner_id == post.author_account_id,
+            Contract.status.in_((ContractStatus.ACTIVE, ContractStatus.DELIVERED, ContractStatus.DISPUTED)),
+            Contract.delivery_ref.is_not(None), Contract.delivery_ref.contains(post.id))
+        return self._lock_reason(delivered.status) if delivered else None
+
+    @staticmethod
+    def _lock_reason(status: str) -> str:
+        if status == ContractStatus.DISPUTED:
+            return "This post is part of an open dispute. You can change it once the dispute is closed."
+        if status == ContractStatus.DELIVERED:
+            return "The brand is reviewing this post. You can change it once the contract is complete."
+        return "This post is part of an active contract. You can change it once the contract ends."
+
+    async def edit(self, account: Account, post_id: str, text: str) -> Post:
+        """FD-08: the author edits the text within 15 minutes. Media can't change; likes and comments were on it."""
+        post = await self.repo(Post).require(post_id, "Post not found")
+        if post.author_account_id != account.id or post.moderation_status == ModerationStatus.REMOVED:
+            raise NotFound("Post not found")
+        if post.moderation_status == ModerationStatus.FLAGGED:
+            raise Conflict("This post is being reviewed and can't be edited", code="under_review")
+        self.require_edit_window(post.created_at, "post")
+        if reason := await self.paid_lock(post):
+            raise Conflict(reason, code="paid_post_locked")
+        text = text.strip()
+        if post.type == PostType.TEXT and not text:
+            raise Unprocessable("A text post needs text", code="text_required")
+        if text == post.text:
+            return post
+        await self.repo(ContentEdit).add(ContentEdit(
+            target_type="post", target_id=post.id, editor_id=account.id, previous_text=post.text))
+        post.text, post.edited_at = text, self.now()
+        moderation = await self.providers.moderation.moderate_text(text) if text else None
+        if moderation and moderation.flagged:
+            post.moderation_status = ModerationStatus.FLAGGED
+            await self.svc.queues.enqueue(Queue.REPORTS, "post", post.id, subject_account_id=account.id,
+                                          summary=f"Auto-flagged edited post: {moderation.reason}")
+        await self.cache.invalidate_prefix("feed:")
+        if not post.sponsored_contract_id:
+            await self.svc.promos.rescan(Principal(account=account), post)
+        return post
+
+    async def edit_history(self, target_type: str, target_id: str) -> dict[str, Any]:
+        """Staff only: every earlier version of a post or comment, oldest first, then what it says now."""
+        model = Post if target_type == "post" else Comment
+        item = await self.repo(model).require(target_id, f"{target_type.capitalize()} not found")
+        edits = await self.repo(ContentEdit).list(
+            ContentEdit.target_type == target_type, ContentEdit.target_id == target_id, order_by=ContentEdit.id)
+        return {"target_type": target_type, "target_id": target_id, "current_text": item.text,
+                "edited_at": item.edited_at.isoformat() if item.edited_at else None,
+                "versions": [{"text": e.previous_text, "replaced_at": e.created_at.isoformat(), "editor_id": e.editor_id}
+                             for e in edits]}
+
     async def delete(self, account: Account, post_id: str) -> None:
         post = await self.repo(Post).require(post_id, "Post not found")
-        if post.author_account_id != account.id:
-            raise Forbidden("You can only delete your own posts")
+        if post.moderation_status == ModerationStatus.REMOVED:
+            raise NotFound("Post not found")
+        if not await self.manages(account, post.author_account_id):
+            raise Forbidden("You can only delete your own posts and your agents' posts")
+        if reason := await self.paid_lock(post):
+            raise Conflict(reason, code="paid_post_locked")
         post.moderation_status = ModerationStatus.REMOVED
         await self.cache.invalidate_prefix("feed:")
 
@@ -296,6 +377,7 @@ class CommentService(BaseService):
             "sponsored": comment.sponsored_listing_id is not None,
             "helpful": {"yes": comment.helpful_count, "no": comment.unhelpful_count},
             "created_at": comment.created_at.isoformat(), "replies": [],
+            "edited_at": comment.edited_at.isoformat() if comment.edited_at and not deleted else None,
         }
         if tags:
             data["agent_tags"] = [self._present_tag(tag, authors) for tag in tags]
@@ -566,10 +648,42 @@ class CommentService(BaseService):
                 nodes[comment.thread_id]["replies"].append(nodes[comment.id])
         return Page(items=[nodes[c.id] for c in roots.items if c.id in nodes], next_cursor=roots.next_cursor)
 
-    async def delete(self, account: Account, comment_id: str) -> None:
-        """Authors delete their own comments; an influencer can delete any reply made on their behalf."""
+    async def edit(self, account: Account, comment_id: str, text: str) -> Comment:
+        """FD-08: people edit their own comments within 15 minutes. Agent and sponsored replies are not
+        edited; they are deleted and sent again. Agents tagged in the new text are not tagged again."""
         comment = await self.repo(Comment).require(comment_id, "Comment not found")
-        if account.id not in (comment.author_account_id, comment.on_behalf_of_account_id):
+        if comment.author_account_id != account.id or comment.deleted_at is not None:
+            raise NotFound("Comment not found")
+        if comment.label != Label.HUMAN or comment.system_generated or comment.sponsored_listing_id:
+            raise Forbidden("Only comments people write themselves can be edited", code="not_editable")
+        if comment.moderation_status != ModerationStatus.VISIBLE:
+            raise Conflict("This comment is being reviewed and can't be edited", code="under_review")
+        self.svc.posts.require_edit_window(comment.created_at, "comment")
+        text = text.strip()
+        if not text:
+            raise Unprocessable("A comment needs text", code="text_required")
+        if text == comment.text:
+            return comment
+        post = await self.repo(Post).require(comment.post_id, "Post not found")
+        await self.repo(ContentEdit).add(ContentEdit(
+            target_type="comment", target_id=comment.id, editor_id=account.id, previous_text=comment.text))
+        comment.text, comment.edited_at = text, self.now()
+        moderation = await self.providers.moderation.moderate_text(text)
+        comment.flagged_vulgar, comment.moderation_reason = moderation.vulgar, moderation.reason
+        if moderation.flagged:
+            comment.moderation_status = ModerationStatus.FLAGGED
+            await self.svc.queues.enqueue(Queue.REPORTS, "comment", comment.id, subject_account_id=account.id,
+                                          summary=f"Auto-flagged edited comment: {moderation.reason}")
+            return comment
+        await self.svc.promos.rescan(Principal(account=account), post, comment)
+        return comment
+
+    async def delete(self, account: Account, comment_id: str) -> None:
+        """Authors delete their own comments; an influencer can delete any reply made on their behalf,
+        and an owner any comment their agent wrote."""
+        comment = await self.repo(Comment).require(comment_id, "Comment not found")
+        if account.id != comment.on_behalf_of_account_id and not await self.svc.posts.manages(
+                account, comment.author_account_id):
             raise Forbidden("You can't delete this comment")
         if comment.deleted_at is None:
             comment.deleted_at = self.now()

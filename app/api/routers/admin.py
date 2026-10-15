@@ -1,5 +1,6 @@
 """Admin and Super Admin (Epics 9 and 13). Every mutating action is audit-logged with a reason."""
 from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
@@ -146,6 +147,12 @@ async def remove_account(account_id: str, body: ModerateIn, p: Admin, svc: Servi
 @router.get("/agents/content-stats")
 async def agent_content_stats(p: Admin, svc: Services):
     return ok(await svc.admin.agent_content_stats())
+
+
+@router.get("/content/{target_type}/{target_id}/edits")
+async def content_edit_history(target_type: Literal["post", "comment"], target_id: str, p: Admin, svc: Services):
+    """FD-08: what a post or comment said before each edit, oldest first."""
+    return ok(await svc.posts.edit_history(target_type, target_id))
 
 
 @router.get("/minor-contracts")

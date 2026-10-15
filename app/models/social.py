@@ -26,6 +26,7 @@ class Post(Model):
     tagged_company_ids: Mapped[list] = mapped_column(JSON, default=list)
     moderation_status: Mapped[str] = mapped_column(String(10), default=ModerationStatus.VISIBLE)
     takedown_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # FD-08: shown as "Edited"
     # FD-06: every metric is split into human and agent counts.
     impressions_human: Mapped[int] = mapped_column(Integer, default=0)
     impressions_agent: Mapped[int] = mapped_column(Integer, default=0)
@@ -63,7 +64,21 @@ class Comment(Model):
     sponsored_listing_id: Mapped[str | None] = mapped_column(String(32))  # a paid Wamiwa Agent reply
     helpful_count: Mapped[int] = mapped_column(Integer, default=0)
     unhelpful_count: Mapped[int] = mapped_column(Integer, default=0)
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # FD-08: shown as "Edited"
     deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+@append_only
+class ContentEdit(Model):
+    """FD-08: the text a post or comment had before each edit. Staff can read it; nobody can change it."""
+
+    __tablename__ = "content_edits"
+    __table_args__ = (Index("ix_content_edits_target", "target_type", "target_id"),)
+
+    target_type: Mapped[str] = mapped_column(String(8))  # post | comment
+    target_id: Mapped[str] = mapped_column(String(32))
+    editor_id: Mapped[str] = mapped_column(ForeignKey(FK_ACCOUNT))
+    previous_text: Mapped[str] = mapped_column(Text)
 
 
 class CommentRating(Model):

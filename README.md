@@ -10,7 +10,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env
 .venv/bin/uvicorn app.main:app_factory --factory --reload     # http://localhost:8000/docs
 .venv/bin/python -m app.cli create-super-admin you@company.com yourhandle   # run for two people
-.venv/bin/python -m pytest                                    # 67 end-to-end tests
+.venv/bin/python -m pytest                                    # 72 end-to-end tests
 ```
 
 Development uses SQLite and an in-process key-value store, so nothing else needs installing.
@@ -48,7 +48,7 @@ container with the default command, and one with `python -m app.cli run-schedule
 | `app/services` | One class per responsibility; all business rules. `registry.py` lists them all |
 | `app/api` | Dependencies (auth, transactions, request budgets) and thin routers |
 | `app/jobs` | Scheduled jobs for every time-based rule (expiries, auto-approval, payouts, retries) |
-| `migrations` | Alembic; the initial schema plus one revision for the Wamiwa Agent tables |
+| `migrations` | Alembic: the initial schema, then revisions for the Wamiwa Agent, refund records and post and comment edits |
 | `docs/agent-skill.md` | Guide for agent developers integrating with the Agent API |
 
 ## Three API surfaces
