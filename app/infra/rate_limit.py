@@ -131,6 +131,7 @@ class RateLimitPolicies:
         self.b2b_conversations = RateLimitPolicy("b2b_conversations", s.b2b_new_conversations_per_day, DAY)  # PRD
         # Abuse-prone human actions.
         self.posts = RateLimitPolicy("posts", 30, HOUR)
+        self.uploads = RateLimitPolicy("uploads", 120, HOUR)
         self.comments = RateLimitPolicy("comments", 120, HOUR)
         self.follows = RateLimitPolicy("follows", 200, HOUR)
         self.messages = RateLimitPolicy("messages", 120, MINUTE)

@@ -15,7 +15,7 @@ from app.models import (
     Account, AdminPermission, Contract, EscrowTransaction, GuardianConfirmation, LedgerEntry, Payment,
     Payout, QueueItem, ReconciliationRun,
 )
-from app.services.base import BaseService
+from app.services.base import BaseService, ServiceContext
 
 
 class FxService(BaseService):
@@ -42,11 +42,20 @@ class PaymentService(BaseService):
                      reference_id: str | None = None) -> Payment:
         await self.limiter.enforce(self.policies.payments, account.id)
         amount_local, rate = await self.svc.fx.to_local(amount_cents)
+        reference = f"{purpose}_{new_id()}"
         result = await self.providers.payments.charge(
-            reference=f"{purpose}_{new_id()}", amount=amount_local, currency=self.s.local_currency,
+            reference=reference, amount=amount_local, currency=self.s.local_currency,
             payment_method=payment_method, customer_id=account.id)
         if result.status == "failed":
             raise PaymentRequired(result.failure_reason or "Payment failed", code="payment_failed")
+        self.svc.money.undo_charge_if_rolled_back(result.provider_ref, amount_local, self.s.local_currency, reference)
+        what = {"subscription": "your Wamiwa subscription", "ai_video": "an AI video", "video_production": "video production",
+                "video_plan": "your video plan", "extra_render": "an extra final render", "arcon_filing": "ARCON filing",
+                "promotion": "your Wamiwa Agent plan"}.get(str(purpose), str(purpose).replace("_", " "))
+        await self.svc.notifications.notify(
+            account.id, NotificationType.PAYMENT, f"Payment received: {amount_local / 100:,.2f} {self.s.local_currency}",
+            f"Thank you. This payment is for {what}. It appears in your payment history.",
+            {"reference_id": reference_id} if reference_id else None)
         return await self.repo(Payment).add(Payment(
             account_id=account.id, purpose=purpose, amount_cents=amount_cents, amount_local=amount_local,
             currency=self.s.local_currency, fx_rate=str(rate), provider_ref=result.provider_ref,
@@ -61,16 +70,12 @@ class PaymentService(BaseService):
         amount = remaining if amount_local is None else min(amount_local, remaining)
         if amount <= 0:
             return payment
-        result = await self.providers.payments.refund(provider_ref=payment.provider_ref, amount=amount,
-                                                      reference=f"refund_{payment.id}_{payment.refunded_local}")
-        if not result.succeeded:
-            raise Conflict(result.failure_reason or "Refund could not be processed", code="refund_failed")
+        # Recorded now, sent to the provider once this transaction commits (and retried until it goes through).
+        await self.svc.money.queue_refund(payment.provider_ref, amount, payment.currency, payment_id=payment.id)
         payment.refunded_local += amount
         if payment.refunded_local >= payment.amount_local:
             payment.status = PaymentStatus.REFUNDED
-        await self.svc.notifications.notify(
-            payment.account_id, NotificationType.PAYMENT, "Refund on its way",
-            f"{amount / 100:,.2f} {payment.currency} will reach you within {self.s.refund_working_days} working days.")
+        await self.svc.money.notify_refund(payment.account_id, amount, payment.currency)
         return payment
 
     async def history(self, account: Account, cursor: str | None, limit: int) -> Page[dict]:
@@ -131,6 +136,7 @@ class EscrowService(BaseService):
             payment_method=payment_method, customer_id=hirer.id)
         if result.status == "failed":
             raise PaymentRequired(result.failure_reason or "Payment failed", code="payment_failed")
+        self.svc.money.undo_charge_if_rolled_back(result.provider_ref, amount, contract.currency, f"escrow_{contract.id}")
         escrow = await self.repo(EscrowTransaction).add(EscrowTransaction(
             contract_id=contract.id, hirer_id=contract.hirer_id, earner_id=contract.earner_id, amount=amount,
             currency=contract.currency, fee_pct=contract.fee_pct, provider_ref=result.provider_ref,
@@ -139,6 +145,10 @@ class EscrowService(BaseService):
         await self.repo(LedgerEntry).add(LedgerEntry(
             escrow_id=escrow.id, contract_id=contract.id, from_state=None, to_state=EscrowState.FUNDED,
             amount=amount, actor_id=hirer.id, reason="Hirer funded escrow"))
+        await self.svc.notifications.notify(
+            hirer.id, NotificationType.PAYMENT, f"Payment received: {amount / 100:,.2f} {contract.currency}",
+            "Wamiwa holds this in escrow. It is released only when the work is approved, and refunded if the offer "
+            "is declined or expires.", {"contract_id": contract.id})
         return escrow
 
     async def activate(self, contract_id: str, actor_id: str | None) -> EscrowTransaction:
@@ -166,10 +176,7 @@ class EscrowService(BaseService):
         released = pct_of(escrow.amount, release_pct)
         refund = escrow.amount - released
         if refund > 0:
-            result = await self.providers.payments.refund(
-                provider_ref=escrow.provider_ref, amount=refund, reference=f"escrow_refund_{escrow.id}")
-            if not result.succeeded:
-                raise Conflict(result.failure_reason or "Refund could not be processed", code="refund_failed")
+            await self.svc.money.queue_refund(escrow.provider_ref, refund, escrow.currency, escrow_id=escrow.id)
             escrow.refund_due_by = add_working_days(self.now(), self.s.refund_working_days)  # PY-03
         escrow.released_gross = released
         escrow.fee_amount = pct_of(released, escrow.fee_pct)  # PY-01: the fee comes out of the price
@@ -272,40 +279,67 @@ class PayoutService(BaseService):
         groups: dict[tuple[str, str], list[EscrowTransaction]] = {}
         for escrow in await self._cleared():
             groups.setdefault((await self.recipient_for(escrow), escrow.earner_id), []).append(escrow)
-        summary = {"ran": True, "paid": 0, "held": 0, "failed": 0, "cycle_date": today.isoformat()}
+        summary = {"ran": True, "sending": 0, "held": 0, "cycle_date": today.isoformat()}
         for (recipient_id, earner_id), escrows in groups.items():
             payout = await self.repo(Payout).add(Payout(
                 account_id=recipient_id, earner_id=earner_id, cycle_date=today,
                 amount=sum(e.net_amount for e in escrows), currency=escrows[0].currency))
             await self._execute(payout, escrows)
-            summary[{"paid": "paid", "held": "held"}.get(payout.status, "failed")] += 1
+            summary["sending" if payout.status == PayoutStatus.PROCESSING else "held"] += 1
         if not groups:
             # Record the cycle so the fortnightly schedule keeps its anchor even with nothing to pay.
             summary["note"] = "No cleared funds to pay"
         return summary
 
     async def _execute(self, payout: Payout, escrows: list[EscrowTransaction]) -> Payout:
+        """Decide and record the payout. The bank transfer itself happens only after this is committed,
+        so a failed request can never have sent money that the records do not show."""
         recipient = await self.repo(Account).require(payout.account_id)
         bank, blocked_reason = await self.svc.bank_accounts.payable(payout.account_id)
         if recipient.status != AccountStatus.ACTIVE:
             bank, blocked_reason = None, "Account is not active"
         if bank is None:
             payout.status, payout.failure_reason = PayoutStatus.HELD, blocked_reason
+            for escrow in escrows:
+                escrow.payout_id = None
             await self.svc.notifications.notify(payout.account_id, NotificationType.PAYMENT, "Payout on hold",
                                                 blocked_reason or "")
             return payout
-        result = await self.providers.payments.transfer(
+        payout.status = PayoutStatus.PROCESSING
+        for escrow in escrows:
+            escrow.payout_id = payout.id  # reserved for this payout
+        infra, payout_id = self.infra, payout.id
+
+        async def send() -> None:
+            async with infra.db.unit_of_work() as uow:
+                await ServiceContext(infra, uow).services.payouts.complete(payout_id)
+
+        self.uow.on_commit(send)
+        return payout
+
+    async def complete(self, payout_id: str) -> Payout | None:
+        """Make the transfer for a recorded payout. Safe to repeat: the provider sees the same reference."""
+        payout = await self.repo(Payout).get(payout_id)
+        if payout is None or payout.status != PayoutStatus.PROCESSING:
+            return payout
+        payout = await self.repo(Payout).lock(payout_id)
+        bank, blocked_reason = await self.svc.bank_accounts.payable(payout.account_id)
+        escrows = list(await self.repo(EscrowTransaction).list(EscrowTransaction.payout_id == payout.id))
+        result = None if bank is None else await self.providers.payments.transfer(
             reference=f"payout_{payout.id}", amount=payout.amount, currency=payout.currency,
             bank_code=bank.bank_code, account_number=bank.account_number, account_name=bank.account_name)
-        if not result.succeeded:
-            payout.status, payout.failure_reason = PayoutStatus.FAILED, result.failure_reason
+        if result is None or not result.succeeded:
+            payout.status = PayoutStatus.HELD if bank is None else PayoutStatus.FAILED
+            payout.failure_reason = blocked_reason if bank is None else result.failure_reason
             for escrow in escrows:
-                escrow.payout_id = None  # stays cleared and is retried next cycle
+                escrow.payout_id = None  # stays cleared and is paid in the next cycle
             return payout
         payout.status, payout.provider_ref, payout.paid_at = PayoutStatus.PAID, result.provider_ref, self.now()
         for escrow in escrows:
             locked = await self.repo(EscrowTransaction).lock(escrow.id)
-            locked.payout_id, locked.paid_at = payout.id, self.now()
+            if locked.state == EscrowState.PAID:
+                continue  # already recorded on an earlier attempt
+            locked.paid_at = self.now()
             await self.svc.escrow._transition(locked, EscrowState.PAID, payout.approved_by, f"Payout {payout.id}",
                                               locked.net_amount)
         await self.svc.notifications.notify(
@@ -316,6 +350,15 @@ class PayoutService(BaseService):
                 payout.earner_id, NotificationType.PAYMENT, "Your earnings were paid to your guardian",
                 f"{payout.amount / 100:,.2f} {payout.currency}", {"payout_id": payout.id})
         return payout
+
+    async def finish_stuck(self) -> int:
+        """Job: a payout recorded but not confirmed (the server stopped mid-way) is completed. The
+        provider recognises the reference, so a transfer that did go through is not sent twice."""
+        stuck = await self.repo(Payout).list(
+            Payout.status == PayoutStatus.PROCESSING, Payout.updated_at <= self.now() - timedelta(minutes=10))
+        for payout in stuck:
+            await self.complete(payout.id)
+        return len(stuck)
 
     # --- manual payouts (PY-02, AD-03) -------------------------------------------------------
     async def _payout_limit(self, admin: Account) -> int | None:
@@ -453,7 +496,8 @@ class ReconciliationService(BaseService):
         charges = await self.repo(Payment).sum(
             Payment.amount_local - Payment.refunded_local, Payment.currency == currency,
             Payment.status.in_([PaymentStatus.SUCCEEDED, PaymentStatus.PENDING_RISK, PaymentStatus.REFUNDED]))
-        expected = held - refunded - charged_back - paid_out + charges
+        # Refunds already decided but not yet made at the provider are still in its balance.
+        expected = held - refunded - charged_back - paid_out + charges + await self.svc.money.pending_total(currency)
         actual = await self.providers.payments.held_balance(currency)
         run = await self.repo(ReconciliationRun).add(ReconciliationRun(
             currency=currency, expected=expected, actual=actual, matched=expected == actual,

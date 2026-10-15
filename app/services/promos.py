@@ -325,6 +325,8 @@ class PromoService(BaseService):
 
         # Check the name before taking any money.
         main_name = brand_name if kind in ("seller", "artist") else company.business_name
+        if main_name and not 2 <= len(normalize_name(main_name)) <= 80:
+            raise Unprocessable("Names must be 2 to 80 characters", code="invalid_name")
         if main_name and await self._claimed_by_other(normalize_name(main_name), listing.id if listing else ""):
             raise Conflict("That name already belongs to another verified account. Contact support if it is yours.",
                            code="name_taken", hint="POST /support/tickets")

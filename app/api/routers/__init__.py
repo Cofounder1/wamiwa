@@ -1,4 +1,4 @@
-from app.api.routers import accounts, admin, auth, business, hiring, machine, promotions, social
+from app.api.routers import accounts, admin, auth, business, hiring, machine, promotions, social, uploads
 
 ROUTERS = (
     auth.router,
@@ -7,6 +7,7 @@ ROUTERS = (
     hiring.router,
     business.router,
     promotions.router,
+    uploads.router,
     admin.router,
     machine.agent_router,
     machine.company_router,

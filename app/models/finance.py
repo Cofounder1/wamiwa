@@ -134,3 +134,28 @@ class Subscription(Model):
     lapse_notice_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     free_seconds_month: Mapped[str | None] = mapped_column(String(7))  # "YYYY-MM" the allowance was used in
     free_seconds_used: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MoneyMovement(Model):
+    """A refund waiting to be made, or made, at the payment provider.
+
+    Written in the same transaction as the decision to refund, and carried out only after that
+    transaction commits, so a rolled-back request can never have refunded anyone. The provider sees
+    `reference`, which is unique, so a retried refund is never paid twice.
+    """
+
+    __tablename__ = "money_movements"
+
+    kind: Mapped[str] = mapped_column(String(10))  # refund | void (undoing a charge whose request failed)
+    status: Mapped[str] = mapped_column(String(10), default="pending", index=True)  # pending | succeeded | failed
+    reference: Mapped[str] = mapped_column(String(64), unique=True)
+    charge_ref: Mapped[str] = mapped_column(String(64))
+    amount: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3))
+    payment_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    escrow_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    provider_ref: Mapped[str | None] = mapped_column(String(64))
+    executed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

@@ -9,7 +9,7 @@ from functools import cached_property
 
 from app.services import (
     accounts, admin, agents, auth, company, content, contracts, disputes, likeness, messaging,
-    emails, notifications, payments, promos, queues, social, support, trust, verification, video,
+    emails, money, notifications, payments, promos, queues, reminders, social, support, trust, verification, video,
 )
 from app.services.base import ServiceContext
 
@@ -42,6 +42,10 @@ class ServiceRegistry:
     @cached_property
     def admin_analytics(self) -> admin.AdminAnalyticsService:
         return admin.AdminAnalyticsService(self._ctx)
+
+    @cached_property
+    def reminders(self) -> reminders.ReminderService:
+        return reminders.ReminderService(self._ctx)
 
     @cached_property
     def support(self) -> support.SupportService:
@@ -147,6 +151,10 @@ class ServiceRegistry:
         return agents.AgentActionService(self._ctx)
 
     # --- money and contracts ------------------------------------------------------------------------
+    @cached_property
+    def money(self) -> money.MoneyMovementService:
+        return money.MoneyMovementService(self._ctx)
+
     @cached_property
     def fx(self) -> payments.FxService:
         return payments.FxService(self._ctx)

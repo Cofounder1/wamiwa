@@ -67,6 +67,8 @@ class SandboxPaymentGateway(PaymentGateway):
         self.bank_accounts: dict[str, str] = {}
         self.transfers: list[dict] = []
         self.refunds: list[dict] = []
+        self._done: dict[str, TransferResult] = {}
+        self.fail_next_refunds = 0  # tests: make the next N refunds fail
 
     async def charge(self, *, reference, amount, currency, payment_method, customer_id) -> ChargeResult:
         if payment_method == "tok_fail":
@@ -77,19 +79,28 @@ class SandboxPaymentGateway(PaymentGateway):
         return ChargeResult("pending_risk" if payment_method == "tok_risk" else "succeeded", provider_ref)
 
     async def refund(self, *, provider_ref, amount, reference) -> TransferResult:
+        if reference in self._done:
+            return self._done[reference]  # same reference: already done, never paid twice
         if provider_ref not in self.charges:
             return TransferResult(False, failure_reason="Unknown charge")
+        if self.fail_next_refunds > 0:
+            self.fail_next_refunds -= 1
+            return TransferResult(False, failure_reason="Provider temporarily unavailable")
         currency = self.charges[provider_ref][1]
         self.balance[currency] = self.balance.get(currency, 0) - amount
         self.refunds.append({"provider_ref": provider_ref, "amount": amount, "reference": reference})
-        return TransferResult(True, f"rf_{new_id()}")
+        self._done[reference] = TransferResult(True, f"rf_{new_id()}")
+        return self._done[reference]
 
     async def transfer(self, *, reference, amount, currency, bank_code, account_number, account_name) -> TransferResult:
+        if reference in self._done:
+            return self._done[reference]
         if account_number.endswith("0000"):
             return TransferResult(False, failure_reason="Beneficiary bank rejected the transfer")
         self.balance[currency] = self.balance.get(currency, 0) - amount
         self.transfers.append({"reference": reference, "amount": amount, "account_number": account_number})
-        return TransferResult(True, f"tr_{new_id()}")
+        self._done[reference] = TransferResult(True, f"tr_{new_id()}")
+        return self._done[reference]
 
     async def resolve_account_name(self, bank_code, account_number, claimed_name=None) -> str | None:
         if account_number.startswith("000"):

@@ -10,7 +10,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env
 .venv/bin/uvicorn app.main:app_factory --factory --reload     # http://localhost:8000/docs
 .venv/bin/python -m app.cli create-super-admin you@company.com yourhandle   # run for two people
-.venv/bin/python -m pytest                                    # 46 end-to-end tests
+.venv/bin/python -m pytest                                    # 66 end-to-end tests
 ```
 
 Development uses SQLite and an in-process key-value store, so nothing else needs installing.
@@ -45,11 +45,31 @@ Lists use cursor pagination (`next_cursor`, `has_more`).
 Any write request can carry an `Idempotency-Key` header. Repeating the request with the same key within
 24 hours returns the first successful response (marked `Idempotent-Replay: true`) instead of acting twice.
 
+## Connecting the web frontend
+
+The web app (`wamiwa-frontend`, Vite on http://localhost:5173) calls this API from the browser.
+
+- **CORS** is on for `http://localhost:5173` and `https://wamiwa.site` by default; change `WAMIWA_CORS_ORIGINS` to add others. Rate-limit and `Idempotent-Replay` headers are readable from the page.
+- **Logging in:** `POST /auth/login` returns an access token (15 minutes) and a refresh token; send the access token as `Authorization: Bearer ...` and renew with `POST /auth/refresh`.
+- **Files:** upload with `POST /uploads` (multipart: `kind` and `file`), then pass the returned `ref` to the endpoint that needs it. Photos and videos come back from `/media/...`; ID documents and likeness voice samples are never served back.
+- **Demo data:** `python -m app.cli seed-demo` creates demo accounts (Kemi, Kiki, Kola, Zuri Fashion House, Zainab with two agents, and two Super Admins) with some posts. Development databases only.
+- **Sign-up codes without email:** set `WAMIWA_DEV_FIXED_OTP=123456` in a local `.env`. Never on a shared or live server.
+- **The full API** is listed at http://localhost:8000/docs, and `/openapi.json` can generate TypeScript types for the frontend.
+
 ## Wamiwa Agent (Epic 15)
 
 The paid smart-mention feature lives in `app/services/promos.py`: what a new post or comment gets is decided
 once in `PromoService.scan`, and what a reader sees in `PromoService.decorate`. Plans, names, links, cards, Plus content ideas
 and the Suggested sellers list are under `/promotions`; results appear in `GET /analytics/me` under `wamiwa_agent`.
+
+## Errors and failures
+
+- Every error has the same shape: `{"success": false, "error", "code", "hint", "request_id"}`. Every response carries an `X-Request-ID` header (the caller's own, if it sends one), and every log line includes it.
+- Crashes return a plain 500 with the request ID, never internal details, and still carry CORS headers so the browser can show it.
+- Two requests racing for something unique (a handle, an email) get a clear 409, not a crash.
+- Money: a card charged during a request that then fails is refunded automatically. Refunds and payouts are recorded first and sent to the payment provider only once saved, with a unique reference so a retry never pays twice; failed refunds are retried and reach the admins after five attempts.
+- If Redis is down, everyday use continues (rate limits and the cache are skipped), sign-in codes answer 503, and no scheduled job runs. Database trouble and queries over 15 seconds answer 503.
+- `GET /health` reports the database and Redis (503 when either is down); `GET /health/live` only says the process is up.
 
 ## Rate limiting
 

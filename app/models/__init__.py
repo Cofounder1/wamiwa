@@ -8,7 +8,7 @@ from app.models.contracts import (
     LikenessConsent, LikenessPage, Script, ScriptChangeRequest, VideoProduction,
 )
 from app.models.finance import (
-    Dispute, DisputeEvidence, EscrowTransaction, LedgerEntry, Payment, Payout, Subscription,
+    Dispute, DisputeEvidence, EscrowTransaction, LedgerEntry, MoneyMovement, Payment, Payout, Subscription,
 )
 from app.models.platform import (
     AdminInvite, AdminPermission, ApiKey, AuditLog, B2BCategoryLink, Conversation,

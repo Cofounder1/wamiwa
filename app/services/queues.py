@@ -64,10 +64,35 @@ class QueueService(BaseService):
             QueueItem.decision.is_(None))
         if existing:
             return existing
-        return await self.repo(QueueItem).add(QueueItem(
+        item = await self.repo(QueueItem).add(QueueItem(
             queue=queue, target_type=target_type, target_id=target_id, subject_account_id=subject_account_id,
             summary=summary, severity=severity, due_at=due_at or self.due_at(queue, severity), escalated=escalated,
         ))
+        if severity == "high" or queue == Queue.DISPUTES:
+            # Urgent work reaches every admin straight away; everything else is in the daily summary.
+            label = str(queue).replace("_", " ")
+            await self.svc.admin.alert_admins(f"New {label} item needs a decision", summary[:300],
+                                              {"queue": str(queue), "queue_item_id": item.id})
+        return item
+
+    async def send_daily_summary(self) -> int:
+        """Job: one email a day to each admin listing what is waiting and what is late, per queue."""
+        now = self.now()
+        lines = []
+        for queue in Queue:
+            waiting = await self.repo(QueueItem).count(QueueItem.queue == queue, QueueItem.decision.is_(None))
+            if waiting:
+                late = await self.repo(QueueItem).count(QueueItem.queue == queue, QueueItem.decision.is_(None),
+                                                        QueueItem.due_at < now)
+                lines.append(f"- {str(queue).replace('_', ' ').capitalize()}: {waiting} waiting" +
+                             (f", {late} past target" if late else ""))
+        if not lines:
+            return 0
+        admins = await self.repo(Account).list(Account.type == AccountType.ADMIN, Account.status == "active")
+        for admin in admins:
+            await self.svc.notifications.notify(admin.id, NotificationType.ADMIN, "Today's review queues",
+                                                "\n".join(lines), {"queue": "summary"})
+        return len(admins)
 
     async def list_items(self, queue: Queue, *, open_only: bool, mine: str | None, cursor: str | None,
                          limit: int) -> Page[QueueItem]:

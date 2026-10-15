@@ -54,13 +54,13 @@ async def test_minor_needs_a_verified_guardian(api):
 
     await api.ok("POST", "/guardians/invite", minor, json={"contact": "mum@example.com"})
     token = api.infra.providers.email.last_for("mum@example.com")["body"].split("token=")[1]
-    guardian = await api.signup("mum", name="Ngozi Obi")
+    guardian = await api.signup("mum", name="Funmilayo Ogunleye")
     accepted = await api.ok("POST", "/guardians/accept", guardian,
                             json={"token": token, "relationship": "mother", "confirm_relationship": True})
     assert accepted["status"] == "pending_verification"
     assert (await api.ok("GET", "/accounts/me", minor))["status"] == "pending_guardian"
 
-    await api.verify_id(guardian, "Ngozi Obi")
+    await api.verify_id(guardian, "Funmilayo Ogunleye")
     assert (await api.ok("GET", "/accounts/me", minor))["status"] == "active"
     minors = await api.ok("GET", "/guardians/minors", guardian)
     assert minors[0]["minor_id"] == minor.id
@@ -203,9 +203,9 @@ async def test_welcome_email_from_the_founder(api):
     def welcome_for(address):
         return [m for m in outbox if m["to"] == address and m["subject"] == "Welcome to Wamiwa"]
 
-    await api.signup("ada", name="Ada Obi")
+    await api.signup("ada", name="Bisi Adewale")
     [mail] = welcome_for("ada@example.com")
-    assert mail["body"].startswith("Hi Ada,") and "Damilola Oladimeji\nFounder & CEO, Wamiwa" in mail["body"]
+    assert mail["body"].startswith("Hi Bisi,") and "Damilola Oladimeji\nFounder & CEO, Wamiwa" in mail["body"]
     assert "just reply" in mail["body"]
 
     admin = await api.admin()
@@ -214,14 +214,14 @@ async def test_welcome_email_from_the_founder(api):
     assert company_mail["body"].startswith("Hi Acme Ltd team,") and "verify your business" in company_mail["body"]
 
     # A 13-17 account is only welcomed once a guardian has linked and been verified.
-    minor = await api.signup("teen", dob="2011-06-01", name="Teen Obi")
+    minor = await api.signup("teen", dob="2011-06-01", name="Teen Ogunleye")
     assert welcome_for("teen@example.com") == []
     await api.ok("POST", "/guardians/invite", minor, json={"contact": "mum@example.com"})
     token = api.infra.providers.email.last_for("mum@example.com")["body"].split("token=")[1]
-    guardian = await api.signup("mum", name="Ngozi Obi")
+    guardian = await api.signup("mum", name="Funmilayo Ogunleye")
     await api.ok("POST", "/guardians/accept", guardian, json={"token": token, "relationship": "mother", "confirm_relationship": True})
     assert welcome_for("teen@example.com") == []
-    await api.verify_id(guardian, "Ngozi Obi")
+    await api.verify_id(guardian, "Funmilayo Ogunleye")
     [teen_mail] = welcome_for("teen@example.com")
     assert teen_mail["body"].startswith("Hi Teen,") and "guardian has linked" in teen_mail["body"]
     assert len(welcome_for("mum@example.com")) == 1  # the guardian got their own, once

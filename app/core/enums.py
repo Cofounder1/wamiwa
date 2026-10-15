@@ -246,6 +246,7 @@ class PaymentStatus(StrEnum):
 class PayoutStatus(StrEnum):
     PENDING_APPROVAL = "pending_approval"
     APPROVED = "approved"
+    PROCESSING = "processing"  # recorded; the bank transfer is made once that is committed
     PAID = "paid"
     HELD = "held"
     FAILED = "failed"
@@ -383,11 +384,14 @@ class NotificationType(StrEnum):
     DISPUTE = "dispute"
     SECURITY = "security"
     LEGAL = "legal"
+    ADMIN = "admin"  # queue items and alerts for Wamiwa staff
     # Optional per type
     LIKE = "like"
     COMMENT = "comment"
     PROFILE_VIEW = "profile_view"
     POST_IDEAS = "post_ideas"
+    MESSAGE = "message"
+    FOLLOW = "follow"
 
 
 MANDATORY_NOTIFICATIONS = frozenset(
@@ -397,5 +401,6 @@ MANDATORY_NOTIFICATIONS = frozenset(
         NotificationType.DISPUTE,
         NotificationType.SECURITY,
         NotificationType.LEGAL,
+        NotificationType.ADMIN,
     }
 )

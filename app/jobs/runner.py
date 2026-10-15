@@ -44,6 +44,8 @@ JOBS: tuple[Job, ...] = (
     Job("disputes.apply_unappealed", HOUR, lambda s: s.disputes.apply_unappealed()),
     # Money
     Job("payouts.run_cycle", DAY, lambda s: s.payouts.run_cycle()),
+    Job("payouts.finish_stuck", 10 * MINUTE, lambda s: s.payouts.finish_stuck()),
+    Job("money.retry_due", 5 * MINUTE, lambda s: s.money.retry_due()),
     Job("reconciliation.run", DAY, lambda s: s.reconciliation.run()),
     # Subscriptions and daily content
     Job("subscriptions.process_renewals", HOUR, lambda s: s.subscriptions.process_renewals()),
@@ -53,6 +55,8 @@ JOBS: tuple[Job, ...] = (
     Job("promos.refresh_defaults", DAY, lambda s: s.promos.refresh_defaults()),
     Job("post_ideas.generate_daily", DAY, lambda s: s.post_ideas.generate_daily()),
     Job("notifications.send_daily_digests", DAY, lambda s: s.notifications.send_daily_digests()),
+    Job("reminders.send_due", HOUR, lambda s: s.reminders.send_due()),
+    Job("queues.send_daily_summary", DAY, lambda s: s.queues.send_daily_summary()),
     # Accounts and verification
     Job("accounts.convert_minors_turning_18", DAY, lambda s: s.accounts.convert_minors_turning_18()),
     Job("creators.recheck_due", DAY, lambda s: s.creators.recheck_due()),
@@ -78,8 +82,14 @@ class JobRunner:
     async def run_due(self) -> list[str]:
         ran = []
         for job in self._jobs.values():
-            # The lock expires after one interval, which is also what makes the job due again.
-            if not await self._infra.kv.set_if_absent(f"job:{job.name}", "1", job.interval_seconds):
+            # The lock expires after one interval, which is also what makes the job due again. If the
+            # store is down, no job runs: better late than twice (money jobs move funds).
+            kv = getattr(self._infra.kv, "strict", self._infra.kv)
+            try:
+                if not await kv.set_if_absent(f"job:{job.name}", "1", job.interval_seconds):
+                    continue
+            except Exception:  # noqa: BLE001
+                log.warning("job %s skipped: lock store unavailable", job.name)
                 continue
             try:
                 await self.run_job(job.name)

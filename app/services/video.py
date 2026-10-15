@@ -139,6 +139,15 @@ class VideoGenerationService(BaseService):
         extra_minutes = max(0, math.ceil((seconds - self.s.video_default_seconds) / 60))
         return self.s.video_price_cents + extra_minutes * self.s.extra_minute_cents
 
+    async def check_production(self, brand: Account, seconds: int, use_plan: bool) -> None:
+        """Everything that could refuse the production, checked before any money is taken."""
+        if seconds and (seconds < 5 or seconds > 600):
+            raise Unprocessable("Video length must be between 5 seconds and 10 minutes", code="invalid_length")
+        if use_plan:
+            plan = await self.repo(BrandVideoPlan).first(BrandVideoPlan.company_account_id == brand.id)
+            if plan is None or not plan.active or plan.videos_left + plan.rollover_left <= 0:
+                raise Conflict("Your plan has no videos left", code="plan_exhausted")
+
     async def open_production(self, contract: Contract, brand: Account, seconds: int, use_plan: bool,
                               payment_method: str) -> VideoProduction:
         """Video production is charged on top of the influencer's likeness price."""

@@ -12,7 +12,14 @@ from app.services.base import BaseService
 
 
 class OtpService(BaseService):
-    """One-time codes kept in the key-value store: hashed, short-lived and attempt-limited."""
+    """One-time codes kept in the key-value store: hashed, short-lived and attempt-limited.
+
+    Uses the store strictly: if it is down, codes cannot be checked, so sign-in says so instead of
+    guessing."""
+
+    @property
+    def _kv(self):
+        return getattr(self.kv, "strict", self.kv)
 
     def _keys(self, purpose: str, identifier: str) -> tuple[str, str, str]:
         base = f"otp:{purpose}:{identifier.lower()}"
@@ -25,38 +32,44 @@ class OtpService(BaseService):
 
     async def issue(self, purpose: str, identifier: str) -> str:
         code_key, wrong_key, lock_key = self._keys(purpose, identifier)
-        lock_ttl = await self.kv.ttl(lock_key)
+        lock_ttl = await self._kv.ttl(lock_key)
         if lock_ttl:
             raise Locked("Too many wrong codes. Try again later.", code="otp_locked", retry_after_seconds=lock_ttl)
         await self.limiter.enforce(
             self._send_policy, f"{purpose}:{identifier.lower()}",
             "You have requested too many codes. Try again when the hour has passed.")
         code = SecretFactory.otp(self.s.otp_length)
-        await self.kv.set(code_key, self.infra.hasher.digest(code), self.s.otp_ttl_seconds)
-        await self.kv.delete(wrong_key)
+        if self.s.dev_fixed_otp and not self.s.is_production:
+            code = self.s.dev_fixed_otp  # development convenience; startup refuses this in production
+        await self._kv.set(code_key, self.infra.hasher.digest(code), self.s.otp_ttl_seconds)
+        await self._kv.delete(wrong_key)
         return code
 
     async def verify(self, purpose: str, identifier: str, code: str) -> None:
         code_key, wrong_key, lock_key = self._keys(purpose, identifier)
-        lock_ttl = await self.kv.ttl(lock_key)
+        lock_ttl = await self._kv.ttl(lock_key)
         if lock_ttl:
             raise Locked("Too many wrong codes. Try again later.", code="otp_locked", retry_after_seconds=lock_ttl)
-        stored = await self.kv.get(code_key)
+        stored = await self._kv.get(code_key)
         if stored is None:
             raise Gone("This code has expired. Request a new one.", code="otp_expired")
         if not self.infra.hasher.matches(code, stored):
-            wrong = await self.kv.incr(wrong_key, ttl=self.s.otp_ttl_seconds)
+            wrong = await self._kv.incr(wrong_key, ttl=self.s.otp_ttl_seconds)
             if wrong >= self.s.otp_max_wrong_attempts:
-                await self.kv.set(lock_key, "1", self.s.otp_lock_seconds)
-                await self.kv.delete(code_key, wrong_key)
+                await self._kv.set(lock_key, "1", self.s.otp_lock_seconds)
+                await self._kv.delete(code_key, wrong_key)
                 raise Locked("Too many wrong codes. This email is locked for 15 minutes.", code="otp_locked",
                              retry_after_seconds=self.s.otp_lock_seconds)
             raise Unprocessable("Incorrect code", code="otp_incorrect",
                                 attempts_left=self.s.otp_max_wrong_attempts - wrong)
-        await self.kv.delete(code_key, wrong_key)
+        await self._kv.delete(code_key, wrong_key)
 
 
 class AuthService(BaseService):
+    @property
+    def _strict_kv(self):
+        return getattr(self.kv, "strict", self.kv)
+
     SIGNUP, RESET, ACCESS, REFRESH = "signup", "password_reset", "access", "refresh"
 
     # --- signup (ON-01, ON-02) ---------------------------------------------------------
@@ -132,7 +145,7 @@ class AuthService(BaseService):
     async def _session(self, account: Account) -> dict[str, Any]:
         refresh = self.infra.tokens.issue(self.REFRESH, account.id, self.s.refresh_token_ttl_seconds)
         jti = self.infra.tokens.decode(refresh, self.REFRESH)["jti"]
-        await self.kv.set(f"refresh:{jti}", account.id, self.s.refresh_token_ttl_seconds)
+        await self._strict_kv.set(f"refresh:{jti}", account.id, self.s.refresh_token_ttl_seconds)
         return {
             "access_token": self.infra.tokens.issue(self.ACCESS, account.id, self.s.access_token_ttl_seconds),
             "refresh_token": refresh,
@@ -166,9 +179,9 @@ class AuthService(BaseService):
     async def refresh(self, refresh_token: str) -> dict[str, Any]:
         payload = self.infra.tokens.decode(refresh_token, self.REFRESH)
         key = f"refresh:{payload['jti']}"
-        if await self.kv.get(key) != payload["sub"]:
+        if await self._strict_kv.get(key) != payload["sub"]:
             raise Unauthorized("Session expired. Log in again.", code="session_revoked")
-        await self.kv.delete(key)  # rotation: each refresh token works once
+        await self._strict_kv.delete(key)  # rotation: each refresh token works once
         account = await self.repo(Account).get(payload["sub"])
         if account is None or account.status in (AccountStatus.DELETED, AccountStatus.REMOVED):
             raise Unauthorized("Session expired. Log in again.", code="session_revoked")
@@ -179,7 +192,7 @@ class AuthService(BaseService):
             payload = self.infra.tokens.decode(refresh_token, self.REFRESH)
         except Unauthorized:
             return
-        await self.kv.delete(f"refresh:{payload['jti']}")
+        await self._strict_kv.delete(f"refresh:{payload['jti']}")
 
     async def resolve_access_token(self, token: str) -> Account:
         payload = self.infra.tokens.decode(token, self.ACCESS)

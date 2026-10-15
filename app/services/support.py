@@ -58,6 +58,9 @@ class SupportService(BaseService):
         if account.email:
             self.svc.notifications.email(account.email, f"We received your request ({ticket.number})",
                                          f"Ticket {ticket.number}: {ticket.subject}. We aim to reply within {hours} hours.")
+        if category in URGENT:  # payments and safety have a 4-hour target, so staff hear at once
+            await self.svc.admin.alert_admins(f"Urgent support ticket {ticket.number}",
+                                              f"{category}: {ticket.subject}", {"ticket_id": ticket.id})
         return self.present(ticket)
 
     async def _mine(self, account: Account, ticket_id: str) -> SupportTicket:

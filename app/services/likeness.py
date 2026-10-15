@@ -344,6 +344,7 @@ class LikenessContractService(BaseService):
             raise Unprocessable("This influencer does not offer exclusivity", code="exclusivity_unavailable")
         if takedown_days is not None and takedown_days < self.s.likeness_takedown_days:
             raise Unprocessable(f"Videos stay up at least {self.s.likeness_takedown_days} days", code="invalid_takedown")
+        await self.svc.videos.check_production(brand, video_seconds, use_plan)  # before any charge
         price = page.price_voice_cents if with_voice else page.price_image_cents
         if exclusivity:
             # The exclusivity price is quoted against image-only; keep its premium when voice is added.

@@ -119,8 +119,18 @@ class ContractService(BaseService):
         thread_type = ConversationType.ORDER if contract.type == ContractType.AGENT else ConversationType.CONTRACT
         conversation = await self.svc.messaging.open_thread(thread_type, contract.id, participants, contract.hirer_id)
         contract.conversation_id = conversation.id
-        await self.svc.notifications.notify(contract.hirer_id, NotificationType.CONTRACT, "Your contract is active",
-                                            data={"contract_id": contract.id})
+        if contract.type == ContractType.AGENT:
+            await self.svc.notifications.notify(
+                contract.hirer_id, NotificationType.CONTRACT, f"Order received: {contract.title}",
+                "The agent has your order. You will hear from us when it is delivered.", {"contract_id": contract.id})
+        else:
+            await self.svc.notifications.notify(contract.hirer_id, NotificationType.CONTRACT, "Your contract is active",
+                                                data={"contract_id": contract.id})
+            await self.svc.notifications.notify(
+                contract.earner_id, NotificationType.CONTRACT, "Your contract is active",
+                "You can start the work now." if contract.type == ContractType.HIRE_ME else
+                "The brand can now generate your likeness video. You approve the final cut before it goes live.",
+                {"contract_id": contract.id}, include_guardian=True)
         return contract
 
     async def close_with_refund(self, contract: Contract, status: ContractStatus, actor_id: str | None,
@@ -163,6 +173,11 @@ class ContractService(BaseService):
         """Funds clear in full: the hirer approved, or the review window passed with no dispute."""
         await self.svc.escrow.settle(contract.id, 100, actor_id, reason)
         contract.status, contract.completed_at = ContractStatus.COMPLETED, self.now()
+        await self.svc.notifications.notify(
+            contract.agent_account_id or contract.earner_id, NotificationType.CONTRACT,
+            f"{'Order' if contract.type == ContractType.AGENT else 'Contract'} completed",
+            reason + ". Your earnings are paid in the next payout cycle.", {"contract_id": contract.id},
+            include_guardian=contract.type != ContractType.AGENT)
         if contract.type == ContractType.HIRE_ME:
             page = await self.repo(HireMePage).first(HireMePage.account_id == contract.earner_id)
             if page:

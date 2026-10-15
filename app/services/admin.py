@@ -182,7 +182,7 @@ class AdminService(BaseService):
     async def alert_admins(self, title: str, body: str, data: dict | None = None) -> None:
         """Tell every active Admin and Super Admin."""
         for admin in await self.repo(Account).list(Account.type == AccountType.ADMIN, Account.status == AccountStatus.ACTIVE):
-            await self.svc.notifications.notify(admin.id, NotificationType.LEGAL, title, body, data)
+            await self.svc.notifications.notify(admin.id, NotificationType.ADMIN, title, body, data)
 
     async def alert_super_admins(self, title: str, body: str) -> None:
         supers = await self.repo(Account).list(

@@ -134,3 +134,56 @@ class RedisKeyValueStore(KeyValueStore):
 
     async def close(self) -> None:
         await self._redis.aclose()
+
+
+class ResilientKeyValueStore(KeyValueStore):
+    """Wraps the real store so a Redis outage degrades the app instead of failing every request.
+
+    Rate limits and the cache "fail open" (requests are allowed, data is read from the database).
+    Anything that must not be guessed (sign-in codes, sessions, job locks) uses `.strict`, which still
+    raises, and the API turns that into a clear "temporarily unavailable".
+    """
+
+    def __init__(self, inner: KeyValueStore):
+        import logging
+
+        self.strict = inner
+        self._log = logging.getLogger("wamiwa.kv")
+
+    async def _safe(self, operation: str, coro, fallback):
+        try:
+            return await coro
+        except Exception as exc:  # noqa: BLE001 - degrade, never take the request down
+            self._log.warning("key-value store unavailable during %s: %s", operation, exc)
+            return fallback
+
+    async def get(self, key: str) -> str | None:
+        return await self._safe("get", self.strict.get(key), None)
+
+    async def set(self, key: str, value: str, ttl: int | None = None) -> None:
+        await self._safe("set", self.strict.set(key, value, ttl), None)
+
+    async def set_if_absent(self, key: str, value: str, ttl: int | None = None) -> bool:
+        return await self._safe("set_if_absent", self.strict.set_if_absent(key, value, ttl), True)
+
+    async def delete(self, *keys: str) -> None:
+        await self._safe("delete", self.strict.delete(*keys), None)
+
+    async def incr(self, key: str, amount: int = 1, ttl: int | None = None) -> int:
+        return await self._safe("incr", self.strict.incr(key, amount, ttl), 0)
+
+    async def ttl(self, key: str) -> int:
+        return await self._safe("ttl", self.strict.ttl(key), 0)
+
+    async def delete_prefix(self, prefix: str) -> None:
+        await self._safe("delete_prefix", self.strict.delete_prefix(prefix), None)
+
+    async def ping(self) -> bool:
+        try:
+            await self.strict.set("health:ping", "1", 30)
+            return await self.strict.get("health:ping") == "1"
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def close(self) -> None:
+        await self.strict.close()

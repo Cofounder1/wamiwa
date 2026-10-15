@@ -49,7 +49,7 @@ async def test_hire_me_happy_path_fees_and_payout(api):
     assert (await api.ok("GET", "/earnings", influencer))["cleared"] == kobo(80_00)
 
     summary = await api.run("payouts.run_cycle")
-    assert summary["paid"] == 1
+    assert summary["sending"] == 1
     earnings = await api.ok("GET", "/earnings", influencer)
     assert earnings["paid"] == kobo(80_00) and earnings["cleared"] == 0
     assert api.infra.providers.payments.transfers[0]["amount"] == kobo(80_00)
@@ -277,14 +277,14 @@ async def test_minor_contract_needs_guardian_approval_and_call(api):
     admin = await api.admin()
     brand = await api.company("acme", admin, category="fashion")
     betting = await api.company("betnow", admin, category="betting")
-    minor = await api.signup("teen", dob="2010-03-01", name="Teen Obi")
-    guardian = await api.signup("mum", name="Ngozi Obi")
+    minor = await api.signup("teen", dob="2010-03-01", name="Teen Ogunleye")
+    guardian = await api.signup("mum", name="Funmilayo Ogunleye")
     await api.ok("POST", "/guardians/invite", minor, json={"contact": "mum@example.com"})
     token = api.infra.providers.email.last_for("mum@example.com")["body"].split("token=")[1]
     await api.ok("POST", "/guardians/accept", guardian, json={"token": token, "relationship": "mother",
                                                               "confirm_relationship": True})
-    await api.verify_id(guardian, "Ngozi Obi")
-    await api.bank(guardian, "Ngozi Obi")
+    await api.verify_id(guardian, "Funmilayo Ogunleye")
+    await api.bank(guardian, "Funmilayo Ogunleye")
     await api.ok("PUT", "/hire-me/page", minor, json={"starting_price_cents": 20_00})
 
     # Blocked categories for minors, and DMs only after the guardian approves the company.

@@ -106,6 +106,7 @@ class MessagingService(BaseService):
         conversation.last_message_at = self.now()
         await self.db.execute(update(ConversationParticipant).where(
             ConversationParticipant.conversation_id == conversation.id).values(deleted_at=None))
+        await self._tell_recipients(conversation, sender)
         if warn:
             attempts = await self.kv.incr(f"offplatform:{sender.id}", ttl=30 * 86400)
             if attempts == self.s.off_platform_warnings_before_review:
@@ -113,6 +114,21 @@ class MessagingService(BaseService):
                     Queue.REPORTS, "off_platform", sender.id, subject_account_id=sender.id,
                     summary="Repeated attempts to move paid work off-platform")
         return message
+
+    async def _tell_recipients(self, conversation: Conversation, sender: Account) -> None:
+        """A new-message notice, at most once an hour per conversation, so a busy chat is not a flood of email."""
+        from app.core.enums import NotificationType
+
+        others = await self.repo(ConversationParticipant).list(
+            ConversationParticipant.conversation_id == conversation.id, ConversationParticipant.account_id != sender.id)
+        for other in others:
+            if other.account_id == sender.id or not await self.kv.set_if_absent(
+                    f"msgnotice:{conversation.id}:{other.account_id}", "1", 3600):
+                continue
+            kind = {"order": "your order", "contract": "your contract"}.get(str(conversation.type), "Wamiwa")
+            await self.svc.notifications.notify(
+                other.account_id, NotificationType.MESSAGE, f"New message from @{sender.handle}",
+                f"You have a new message in {kind}.", {"conversation_id": conversation.id})
 
     async def send_direct(self, sender: Account, recipient_id: str, body: str, attachments: list[dict]) -> dict:
         if recipient_id == sender.id:

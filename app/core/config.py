@@ -17,9 +17,21 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./wamiwa.db"
     database_pool_size: int = 5  # steady connections per worker; hosted poolers cap the total per plan
     database_max_overflow: int = 5  # extra connections allowed at busy moments
+    database_query_timeout_seconds: int = 15  # a query running longer is stopped and the request answers 503
     database_schema: str | None = None  # Postgres only: keep the tables in a schema other than "public"
     redis_url: str | None = None  # falls back to an in-process store when unset (single worker only)
-    run_jobs: bool = True  # run the in-process scheduler; disable on all but one worker
+    run_jobs: bool = True
+    # Browser apps allowed to call the API (the web frontend in development and on the site).
+    cors_origins: list[str] = Field(default_factory=lambda: [
+        "http://localhost:5173", "http://127.0.0.1:5173", "https://wamiwa.site", "https://www.wamiwa.site"])
+    # Development only: every one-time code is this value, so the frontend can be clicked through without
+    # reading email. Refused outright in production.
+    dev_fixed_otp: str | None = None
+    # Uploaded files (photos, videos, voice notes, documents). Local disk for now.
+    upload_dir: str = "./uploads"
+    upload_max_bytes: dict[str, int] = Field(default_factory=lambda: {
+        "image": 10 * 1024 * 1024, "video": 200 * 1024 * 1024, "voice_note": 25 * 1024 * 1024,
+        "document": 25 * 1024 * 1024, "likeness_voice": 25 * 1024 * 1024, "id_document": 10 * 1024 * 1024})  # run the in-process scheduler; disable on all but one worker
 
     # --- security ---
     jwt_secret: str = "change-me-in-production-change-me-in-production"

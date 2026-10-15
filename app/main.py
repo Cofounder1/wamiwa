@@ -1,16 +1,18 @@
 """Application factory."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
+from app.api.errors import REQUEST_ID_HEADER, RequestContextMiddleware, register_error_handlers
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.routers import ROUTERS
 from app.container import build_infrastructure
 from app.core.config import Settings, get_settings
-from app.core.exceptions import AppError, RateLimited
 from app.jobs.runner import JobRunner
 from app.services.base import Infrastructure, ServiceContext
 
@@ -41,28 +43,6 @@ class RateLimitHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
-def register_error_handlers(app: FastAPI) -> None:
-    @app.exception_handler(AppError)
-    async def app_error(_request: Request, exc: AppError) -> JSONResponse:
-        headers = {}
-        if isinstance(exc, RateLimited):
-            headers = {"Retry-After": str(exc.retry_after), "X-RateLimit-Limit": str(exc.limit),
-                       "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(exc.reset_at)}
-        return JSONResponse(exc.to_body(), status_code=exc.status_code, headers=headers)
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
-        fields = [{"field": ".".join(str(p) for p in e["loc"][1:]), "message": e["msg"]} for e in exc.errors()]
-        return JSONResponse({"success": False, "error": "Invalid request", "code": "validation_error",
-                             "hint": "Check the listed fields", "fields": fields}, status_code=422)
-
-    @app.exception_handler(Exception)
-    async def unexpected(_request: Request, exc: Exception) -> JSONResponse:
-        log.exception("unhandled error", exc_info=exc)
-        return JSONResponse({"success": False, "error": "Something went wrong on our side",
-                             "code": "internal_error"}, status_code=500)
-
-
 def create_app(settings: Settings | None = None, infra: Infrastructure | None = None) -> FastAPI:
     settings = settings or get_settings()
     if settings.is_production:
@@ -71,6 +51,10 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
                                     "video_webhook_secret") if getattr(settings, name) == defaults[name].default]
         if unsafe or not settings.redis_url:
             raise RuntimeError(f"Refusing to start in production with default secrets {unsafe} or without Redis")
+        if settings.dev_fixed_otp:
+            raise RuntimeError("WAMIWA_DEV_FIXED_OTP must not be set in production")
+        if "*" in settings.cors_origins:
+            raise RuntimeError("WAMIWA_CORS_ORIGINS must list the allowed sites in production, not *")
     infra = infra or build_infrastructure(settings)
     runner = JobRunner(infra)
 
@@ -96,13 +80,40 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
     app.state.jobs = runner
     app.add_middleware(RateLimitHeadersMiddleware)
     app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(RequestContextMiddleware)  # request IDs, and crashes as readable 500s inside CORS
+    # Added last so it is outermost: error and rate-limit responses carry CORS headers too, and the
+    # browser can read the rate-limit and replay headers.
+    app.add_middleware(
+        CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", REQUEST_ID_HEADER],
+        expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After",
+                        "Idempotent-Replay", "Content-Disposition", REQUEST_ID_HEADER],
+        max_age=600)
     register_error_handlers(app)
     for router in ROUTERS:
         app.include_router(router)
 
-    @app.get("/health", include_in_schema=False)
-    async def health() -> dict[str, str]:
+    @app.get("/health/live", include_in_schema=False)
+    async def live() -> dict[str, str]:
+        """The process is up (for restarts). Says nothing about the database or Redis."""
         return {"status": "ok"}
+
+    @app.get("/health", include_in_schema=False)
+    async def health() -> JSONResponse:
+        """Ready to serve: the database answers and the key-value store works. 503 when either does not,
+        so a load balancer or monitor sees the real state."""
+        checks = {"database": "ok", "cache": "ok"}
+        try:
+            async with infra.db.engine.connect() as conn:
+                await asyncio.wait_for(conn.execute(text("SELECT 1")), timeout=3)
+        except Exception:  # noqa: BLE001
+            checks["database"] = "unavailable"
+        ping = getattr(infra.kv, "ping", None)
+        if ping is not None and not await ping():
+            checks["cache"] = "unavailable"
+        healthy = all(value == "ok" for value in checks.values())
+        return JSONResponse({"status": "ok" if healthy else "degraded", **checks}, status_code=200 if healthy else 503)
 
     return app
 

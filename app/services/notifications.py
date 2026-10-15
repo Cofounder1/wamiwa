@@ -39,7 +39,8 @@ class NotificationService(BaseService):
             digest_pending=digest, emailed=not digest and bool(account.email),
         ))
         if not digest and account.email:
-            self._email_after_commit(account.email, title, body)
+            link = await self._link_for(account, data or {})
+            self._email_after_commit(account.email, title, self.compose(account, title, body, link, mandatory))
 
         if include_guardian and profile and profile.is_minor:
             link = await self.repo(GuardianLink).first(
@@ -48,6 +49,50 @@ class NotificationService(BaseService):
                 await self.notify(link.guardian_account_id, type, f"[For @{account.handle}] {title}", body,
                                   {**(data or {}), "minor_id": account.id})
         return notification
+
+    def compose(self, account: Account, title: str, body: str, link: str, mandatory: bool) -> str:
+        """The email version of a notification: who it is for, what happened, where to act, and why it came."""
+        name = (account.display_name or account.handle or "there").split()[0]
+        if account.is_company:
+            name = f"{account.display_name or account.handle} team"
+        why = ("You get these emails because they concern your money, contracts or account security."
+               if mandatory else
+               f"You can turn emails like this off in Settings > Notifications: {self.s.public_base_url}/app/settings")
+        lines = [f"Hi {name},", "", title]
+        if body and body.strip() and body.strip() != title:
+            lines += ["", body.strip()]
+        lines += ["", f"Open in Wamiwa: {link}", "", "The Wamiwa team", "", why]
+        return "\n".join(lines) + "\n"
+
+    async def _link_for(self, account: Account, data: dict[str, Any]) -> str:
+        """The screen in the web app where the person can see or act on this."""
+        from app.models import Contract
+
+        base = f"{self.s.public_base_url}/app"
+        if account.is_admin:
+            if data.get("dispute_id"):
+                return f"{self.s.public_base_url}/admin/disputes/{data['dispute_id']}"
+            return f"{self.s.public_base_url}/admin/queues"
+        if data.get("video_id") and data.get("contract_id"):
+            contract = await self.repo(Contract).get(data["contract_id"])
+            if contract and contract.earner_id == account.id:
+                return f"{base}/likeness/video/{data['video_id']}"
+            return f"{base}/video/{data['contract_id']}"
+        if data.get("contract_id"):
+            contract = await self.repo(Contract).get(data["contract_id"])
+            if contract and contract.type == "agent":
+                return f"{base}/orders/{contract.id}"
+            if data.get("minor_id") and contract and contract.earner_id != account.id:
+                return f"{base}/guardian/contracts"
+            return f"{base}/contracts/{data['contract_id']}"
+        for key, path in (("dispute_id", "disputes"), ("payout_id", "earnings"), ("conversation_id", "messages/{}"),
+                          ("post_id", "post/{}"), ("ticket_id", "support"), ("link_id", "wamiwa-agent"),
+                          ("follower_handle", "u/{}"), ("agent_id", "agents")):
+            if data.get(key):
+                return f"{base}/{path.format(data[key])}" if "{}" in path else f"{base}/{path}"
+        if data.get("minor_id"):
+            return f"{base}/guardian"
+        return f"{base}/notifications"
 
     def _email_after_commit(self, to: str, subject: str, body: str) -> None:
         async def send() -> None:

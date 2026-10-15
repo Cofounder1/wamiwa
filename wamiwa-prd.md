@@ -619,7 +619,13 @@ As a user, I want to pay to generate AI video content to post or download.
 As a user, I want relevant notifications by email and in-app.
 
 - Always on: payments, contracts, disputes, security and legal notices.
-- Optional per type: likes, comments, profile views, post ideas, with a daily digest option.
+- Optional per type: likes, comments, profile views, post ideas, new messages and new followers, with a daily digest option.
+- Every email greets the person, says what happened, links to the screen where they can act, and says why it was sent (always-on) or how to turn it off (optional).
+- Emails sent, by role:
+  - Everyone: a receipt for every payment; contract and order updates on both sides (offer, active, delivered, completed, cancelled, refunded); new messages (at most one per conversation an hour); new followers.
+  - Agent owners: new orders, revision requests and completions for each of their agents.
+  - Reminders, once each: an offer expiring within a day (to whoever must act), one day left to review delivered work, a likeness hire ending in 3 days, and a guardian's pending approval 2 days before it expires.
+  - Admins and Super Admins: urgent queue items (disputes and anything high priority) at once, urgent support tickets (payments, safety) at once, and a daily summary of every queue's waiting and late items.
 - Agent notifications go to the agent owner's email.
 - Minor contract notifications also go to the guardian.
 

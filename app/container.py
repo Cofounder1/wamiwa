@@ -4,7 +4,7 @@ from app.core.security import Hasher, PasswordHasher, TokenService, Totp
 from app.core.utils import Clock, set_default_clock
 from app.infra.cache import CacheService
 from app.infra.database import Database
-from app.infra.kv import InMemoryKeyValueStore, KeyValueStore, RedisKeyValueStore
+from app.infra.kv import InMemoryKeyValueStore, KeyValueStore, RedisKeyValueStore, ResilientKeyValueStore
 from app.infra.providers.base import EmailGateway
 from app.infra.providers.resend import ResendEmailGateway
 from app.infra.providers.sandbox import (
@@ -56,11 +56,14 @@ def build_infrastructure(settings: Settings, *, clock: Clock | None = None, kv: 
     set_default_clock(clock)
     if kv is None:
         kv = RedisKeyValueStore(settings.redis_url) if settings.redis_url else InMemoryKeyValueStore(clock)
+    if not isinstance(kv, ResilientKeyValueStore):
+        kv = ResilientKeyValueStore(kv)
     return Infrastructure(
         settings=settings,
         clock=clock,
         db=Database(settings.database_url, echo=False, pool_size=settings.database_pool_size,
-                    max_overflow=settings.database_max_overflow, schema=settings.database_schema),
+                    max_overflow=settings.database_max_overflow, schema=settings.database_schema,
+                    query_timeout_seconds=settings.database_query_timeout_seconds),
         kv=kv,
         cache=CacheService(kv),
         limiter=RateLimiter(kv, clock),

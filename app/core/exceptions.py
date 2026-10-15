@@ -62,6 +62,11 @@ class Locked(AppError):
     code = "locked"
 
 
+class ServiceUnavailable(AppError):
+    status_code = 503
+    code = "temporarily_unavailable"
+
+
 class RateLimited(AppError):
     status_code = 429
     code = "rate_limited"

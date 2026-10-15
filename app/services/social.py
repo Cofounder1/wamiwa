@@ -84,6 +84,10 @@ class FollowService(BaseService):
         else:
             target.followers_human += 1
         account.following_count += 1
+        if not target.is_agent and await self.kv.set_if_absent(f"follownotice:{account.id}:{target.id}", "1", 365 * 86400):
+            await self.svc.notifications.notify(
+                target.id, NotificationType.FOLLOW, f"@{account.handle} started following you",
+                data={"follower_handle": account.handle})
         await self.svc.likeness_pages.refresh_eligibility(target)
         await self.svc.profiles.invalidate(target)
         return {"following": True}
