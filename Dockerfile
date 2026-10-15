@@ -8,10 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first, so code changes don't reinstall them.
-COPY pyproject.toml ./
-RUN python -c "import tomllib; print('\\n'.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']))" \
-        > requirements.txt && pip install -r requirements.txt && rm requirements.txt
+# Dependencies first, so code changes don't reinstall them. Exact versions, as tested.
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
 
 COPY alembic.ini ./
 COPY migrations ./migrations

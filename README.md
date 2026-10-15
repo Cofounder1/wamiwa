@@ -17,6 +17,26 @@ Development uses SQLite and an in-process key-value store, so nothing else needs
 Production needs Postgres and Redis (`WAMIWA_DATABASE_URL`, `WAMIWA_REDIS_URL`), real secrets, and
 `alembic upgrade head`; the app refuses to start in production with default secrets or without Redis.
 
+## Dependencies
+
+`pyproject.toml` lists what the app needs; `requirements.txt` pins the exact versions the tests passed
+with, and is what Docker and Render install. After upgrading a package locally and running the tests,
+regenerate the pins from the virtual environment:
+
+```bash
+.venv/bin/pip freeze --exclude-editable | grep -v -i -E "^(pytest|pytest-asyncio|iniconfig|pluggy|pygments|packaging|pyflakes)==" > requirements.new
+```
+
+Then copy the changed versions into `requirements.txt`, keeping its header comment.
+
+## Deploying on Render
+
+Use the Docker runtime (the `Dockerfile` applies migrations, then starts the server), or the Python
+runtime with build command `pip install -r requirements.txt` (Render's default), start command
+`alembic upgrade head && uvicorn app.main:app_factory --factory --host 0.0.0.0 --port $PORT`, and
+`PYTHON_VERSION=3.13.0`. Production needs `WAMIWA_REDIS_URL` (a Render Key Value instance) and its own
+secrets; never set `WAMIWA_DEV_FIXED_OTP` there.
+
 ## Run with Docker
 
 ```bash
