@@ -289,7 +289,8 @@ class CommentService(BaseService):
             "text": "[deleted]" if deleted else comment.text, "label": comment.label,
             "label_display": "Agent — Sponsored" if comment.sponsored_listing_id else LabelPolicy.display(
                 comment.label, on_behalf_of_handle=behalf.handle if behalf else None),
-            "author": None if author is None else {"id": author.id, "handle": author.handle, "type": author.type},
+            "author": None if author is None else {"id": author.id, "handle": author.handle, "name": author.display_name,
+                                                  "type": author.type},
             "on_behalf_of": None if behalf is None else {"id": behalf.id, "handle": behalf.handle},
             "moderation_status": comment.moderation_status, "link": comment.link,
             "sponsored": comment.sponsored_listing_id is not None,

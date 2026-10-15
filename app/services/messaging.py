@@ -222,7 +222,8 @@ class MessagingService(BaseService):
             items.append({
                 "id": conversation.id, "type": conversation.type, "contract_id": conversation.contract_id,
                 "accepted": participant.accepted,
-                "with": [{"id": m, "handle": accounts[m].handle, "type": accounts[m].type} for m in members if m in accounts],
+                "with": [{"id": m, "handle": accounts[m].handle, "name": accounts[m].display_name, "type": accounts[m].type}
+                         for m in members if m in accounts],
                 "last_message_at": conversation.last_message_at.isoformat() if conversation.last_message_at else None,
             })
         return Page(items=items, next_cursor=page.next_cursor)
