@@ -56,6 +56,7 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
         if "*" in settings.cors_origins:
             raise RuntimeError("WAMIWA_CORS_ORIGINS must list the allowed sites in production, not *")
     infra = infra or build_infrastructure(settings)
+    log.warning("CORS: browsers may call this API from %s", ", ".join(settings.cors_origins) or "nowhere")
     runner = JobRunner(infra)
 
     @asynccontextmanager

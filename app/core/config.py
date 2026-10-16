@@ -1,9 +1,11 @@
 """Application settings. Every PRD "starting value" lives here so it can change without a deploy."""
+import json
 from decimal import Decimal
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -22,7 +24,8 @@ class Settings(BaseSettings):
     redis_url: str | None = None  # falls back to an in-process store when unset (single worker only)
     run_jobs: bool = True
     # Browser apps allowed to call the API (the web frontend in development and on the site).
-    cors_origins: list[str] = Field(default_factory=lambda: [
+    # In the environment: a JSON list, or addresses separated by commas or spaces.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: [
         "http://localhost:5173", "http://127.0.0.1:5173", "https://wamiwa.site", "https://www.wamiwa.site"])
     # Development only: every one-time code is this value, so the frontend can be clicked through without
     # reading email. Refused outright in production.
@@ -32,6 +35,20 @@ class Settings(BaseSettings):
     upload_max_bytes: dict[str, int] = Field(default_factory=lambda: {
         "image": 10 * 1024 * 1024, "video": 200 * 1024 * 1024, "voice_note": 25 * 1024 * 1024,
         "document": 25 * 1024 * 1024, "likeness_voice": 25 * 1024 * 1024, "id_document": 10 * 1024 * 1024})  # run the in-process scheduler; disable on all but one worker
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_origins(cls, value):
+        """Forgiving, because a browser origin must match exactly: stray quotes, spaces or a trailing
+        slash would otherwise silently block the site."""
+        if isinstance(value, str):
+            text = value.strip().replace("\u201c", '"').replace("\u201d", '"')
+            try:
+                parsed = json.loads(text)
+                value = parsed if isinstance(parsed, list) else [parsed]
+            except ValueError:
+                value = text.strip("[]").replace(",", " ").split()
+        return [o.strip().strip("'\"").strip().rstrip("/") for o in value if o and o.strip().strip("'\"").strip()]
 
     # --- security ---
     jwt_secret: str = "change-me-in-production-change-me-in-production"
