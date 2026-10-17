@@ -7,7 +7,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Repository | Local folder | State |
 | --- | --- | --- |
 | [Cofounder1/wamiwa](https://github.com/Cofounder1/wamiwa) (backend) | `/Users/user/wamiwa` | All work is on `main` |
-| [Cofounder1/wamiwa-frontend](https://github.com/Cofounder1/wamiwa-frontend) (web app) | `/Users/user/wamiwa-frontend` | Not committed yet. Runs on mock data; not connected to the backend |
+| [Cofounder1/wamiwa-frontend](https://github.com/Cofounder1/wamiwa-frontend) (web app) | `/Users/user/wamiwa-frontend` | On `main`, connected to the backend, deployed on Render |
 
 ## Documents
 
@@ -72,7 +72,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Trends data | Plus content ideas | Recommended: YouTube regional charts, plus applying to the Google Trends pilot; not connected |
 | Spotify, YouTube Music, Audiomack | Finding artists' default profiles | Access not confirmed |
 | Instagram, TikTok, X, YouTube, Facebook | Creator verification, friend import | Developer apps not created |
-| Redis | Rate limits, codes, cache, job locks | Runs in Docker locally. No hosted Redis yet; required before going live |
+| Redis | Rate limits, codes, cache, job locks | Render Key Value for the live API; runs in Docker locally |
 
 Anything not connected runs on a built-in stand-in, so the whole app works for development and testing.
 
@@ -81,7 +81,9 @@ Anything not connected runs on a built-in stand-in, so the whole app works for d
 | Item | Detail |
 | --- | --- |
 | Domain | `wamiwa.site`, DNS at Namecheap |
-| Website | Not live yet; the domain points nowhere |
+| Website | Live at `https://wamiwa.site` (Render static site `wamiwa-frontend`). `www.wamiwa.site` needs its CNAME record moved to host `www` |
+| API | Live at `https://wamiwa.onrender.com` (Render web service `wamiwa`). Planned public address: `https://api.wamiwa.site` |
+| Developer docs | `https://wamiwa.site/developers` (Agent API and Company API only) |
 | Mailbox | `info@wamiwa.site` |
 | Emails the app sends | Sign-up codes; the founder's welcome email; payment receipts; contract, order and dispute updates; reminders; new messages and followers; staff alerts and a daily queue summary |
 
@@ -106,12 +108,13 @@ Anything not connected runs on a built-in stand-in, so the whole app works for d
 | Playground (live sessions with a hired agent, paid in credits) | PRD section 16b |
 | Wamiwa MCP (connector for a company's own AI assistant) | PRD section 16c |
 | Using a hired agent inside Figma, Adobe and similar tools | Paused; noted in PRD section 16b |
-| Connecting the web frontend to the backend | Backend side done (CORS, uploads, demo data); the frontend still uses mock data |
 
 ## Open items
 
-- Set up a hosted Redis before going live.
-- Choose where to host the Docker image (API and worker containers).
+- Point `api.wamiwa.site` at the API (Render custom domain plus a Namecheap CNAME), then set the frontend's `VITE_API_URL` to it.
+- Move the API off Render's free plan before real users: it sleeps after 15 idle minutes, and scheduled jobs stop while it sleeps.
+- Move uploads off the server's disk (Render wipes it on each deploy).
+- Stop the local dev server using Supabase directly; point local `.env` at a local database.
 - Choose and connect the remaining vendors above, starting with Korapay.
 - Lawyer review items in PRD section 21, especially whether Wamiwa may hold escrow itself.
 - Load demo accounts into the local Docker database for frontend work (`seed-demo`); Supabase stays clean.
