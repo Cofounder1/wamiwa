@@ -7,6 +7,7 @@ from app.core.enums import (
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
 from app.core.security import SecretFactory
 from app.core.utils import age_on, normalize_phone
+from app.core import regions as core_regions
 from app.models import (
     Account, CompanyProfile, GuardianCompanyApproval, GuardianLink, Subscription, UserProfile,
 )
@@ -164,7 +165,10 @@ class AccountService(BaseService):
             if changes.get(field) is not None:
                 setattr(profile, column, changes[field])
         if changes.get("region") is not None:
-            account.region = changes["region"]
+            account.region = core_regions.normalize(changes["region"])
+            if account.region is None and changes["region"].strip():
+                raise Unprocessable(f"Unknown region: {changes['region']}", code="unknown_region",
+                                    hint="GET /regions lists them")
         await self.svc.profiles.invalidate(account)
         return await self.me(account)
 

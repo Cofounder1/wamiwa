@@ -225,11 +225,11 @@ async def test_artists_and_labels_share_the_links_they_choose(api):
 
 async def test_individual_sellers_and_suggested_sellers(api):
     admin = await api.admin()
-    brand = await api.company("kofishirts", admin, category="fashion", region="abuja")
+    brand = await api.company("kofishirts", admin, category="fashion", region="nigeria")
     nolinks = await api.company("emptyco", admin, category="fashion")
     seller = await api.influencer("tola", "Tola Bello")
     creator, writer = await api.signup("creator"), await api.signup("writer")
-    reader = await api.signup("reader", region="abuja")
+    reader = await api.signup("reader", region="nigeria")
     await api.ok("PUT", "/admin/promotions/keywords", admin, json={
         "category": "fashion", "keywords": ["shirt", "dress", "sneaker"], "reason": "Launch list"})
     await api.ok("POST", "/promotions", brand, json={"kind": "business", "links": [SHOP], "payment_method": PAY})
@@ -297,9 +297,11 @@ async def test_plus_package_content_ideas_for_target_regions(api):
     await api.ok("PATCH", "/promotions", brand, json={"tier": "plus"})
 
     # A brand in Nigeria can aim at China and the US.
-    await api.call("PATCH", "/promotions", brand, json={"target_regions": ["a", "b", "c", "d", "e", "f"]}, expect=422)
+    await api.call("PATCH", "/promotions", brand, json={"target_regions": ["ghana", "kenya", "india", "japan", "peru", "chile"]}, expect=422)
+    r = await api.call("PATCH", "/promotions", brand, json={"target_regions": ["Atlantis"]}, expect=422)
+    assert r.json()["code"] == "unknown_region"
     updated = await api.ok("PATCH", "/promotions", brand, json={"target_regions": ["China", "US"]})
-    assert updated["target_regions"] == ["china", "us"] and plan["id"] == updated["id"]
+    assert updated["target_regions"] == ["china", "united_states"]  # "US" is stored under its full name and plan["id"] == updated["id"]
 
     # Science: what people in China engaged with on Wamiwa this week...
     poster, liker = await api.signup("meili", region="China"), await api.signup("chen", region="China")
@@ -308,12 +310,12 @@ async def test_plus_package_content_ideas_for_target_regions(api):
     await api.ok("PUT", f"/posts/{hot['id']}/like", liker)
     await api.ok("POST", f"/posts/{hot['id']}/comments", liker, json={"text": "Love this"})
     # ...and an outside trends source for the US.
-    api.infra.providers.trends.signals["us"] = [TrendSignal("thrift flips", 0.9, "search trends"),
+    api.infra.providers.trends.signals["united_states"] = [TrendSignal("thrift flips", 0.9, "search trends"),
                                                 TrendSignal("quiet luxury", 0.5, "search trends")]
 
     ideas = await api.ok("GET", "/promotions/content-ideas", brand)
     china, us = ideas["regions"]
-    assert china["region"] == "china" and us["region"] == "us"
+    assert china["region"] == "china" and us["region"] == "united_states"
     assert {i["topic"] for i in china["ideas"]} >= {"hanfu", "citywalk"} and china["based_on"]["posts_analysed"] == 2
     top = china["ideas"][0]
     assert top["topic"] in ("hanfu", "citywalk") and "engagement on Wamiwa" in top["why"]
@@ -323,7 +325,7 @@ async def test_plus_package_content_ideas_for_target_regions(api):
     assert "Halloween" in us["based_on"]["upcoming_moments"]
     # One region at a time, including one that is not on the saved list.
     only = await api.ok("GET", "/promotions/content-ideas?region=US", brand)
-    assert [r["region"] for r in only["regions"]] == ["us"]
+    assert [r["region"] for r in only["regions"]] == ["united_states"]
     quiet = await api.ok("GET", "/promotions/content-ideas?region=brazil", brand)
     assert quiet["regions"][0]["based_on"]["posts_analysed"] == 0  # nothing measurable yet: says so
     # Dropping back to base turns ideas off.
@@ -524,3 +526,15 @@ async def test_claiming_another_artists_name_is_stopped(api):
     label = await api.company("bigwave", admin, category="music")
     await api.ok("POST", "/promotions", label, json={"kind": "label", "payment_method": PAY})
     assert (await api.ok("POST", "/promotions/names", label, json={"name": "Tidewater"}))["names"][-1]["status"] == "approved"
+
+
+async def test_regions_cover_every_country_and_accept_common_names(api):
+    listed = await api.ok("GET", "/regions")
+    ids = {r["id"] for r in listed}
+    assert len(listed) == 200 and {"nigeria", "united_kingdom", "brazil", "japan", "canada", "germany"} <= ids
+    user = await api.signup("ama", region="Ghana")
+    assert (await api.ok("GET", "/accounts/me", user))["region"] == "ghana"
+    await api.ok("PATCH", "/accounts/me/profile", user, json={"region": "UK"})
+    assert (await api.ok("GET", "/accounts/me", user))["region"] == "united_kingdom"
+    r = await api.call("PATCH", "/accounts/me/profile", user, json={"region": "Narnia"}, expect=422)
+    assert r.json()["code"] == "unknown_region"

@@ -25,6 +25,7 @@ from app.core.enums import (
 )
 from app.core.exceptions import Conflict, Forbidden, Gone, NotFound, PaymentRequired, Unprocessable
 from app.core.utils import extract_mentions
+from app.core import regions as core_regions
 from app.models import (
     Account, AgentProfile, Comment, CompanyProfile, Contract, ExternalSocialLink, Post, PromoCategoryKeyword,
     PromoClaim, PromoDailyStat, PromoLink, PromoListing, PromoMatch, PromoName, QueueItem,
@@ -107,9 +108,9 @@ CULTURAL_MOMENTS: dict[str, list[tuple[int, int, str]]] = {
     "nigeria": [(5, 27, "Children's Day"), (6, 12, "Democracy Day"), (10, 1, "Independence Day"),
                 (12, 1, "the start of Detty December")],
     "ghana": [(3, 6, "Independence Day"), (12, 1, "December in GH")],
-    "us": [(2, 1, "Black History Month"), (7, 4, "Independence Day"), (11, 26, "Thanksgiving week"),
+    "united_states": [(2, 1, "Black History Month"), (7, 4, "Independence Day"), (11, 26, "Thanksgiving week"),
            (11, 27, "Black Friday")],
-    "uk": [(8, 24, "Notting Hill Carnival"), (11, 5, "Bonfire Night"), (11, 27, "Black Friday")],
+    "united_kingdom": [(8, 24, "Notting Hill Carnival"), (11, 5, "Bonfire Night"), (11, 27, "Black Friday")],
     "china": [(6, 18, "the 618 shopping festival"), (10, 1, "National Day Golden Week"), (11, 11, "Singles' Day")],
     "india": [(8, 15, "Independence Day"), (11, 1, "the Diwali season")],
     "brazil": [(2, 14, "Carnival season"), (6, 12, "Dia dos Namorados")],
@@ -213,7 +214,15 @@ class PromoService(BaseService):
         return url
 
     def _regions(self, regions: list[str] | None) -> list[str]:
-        cleaned = list(dict.fromkeys(r.strip().lower() for r in regions or [] if r.strip()))
+        cleaned = []
+        for value in regions or []:
+            if not value.strip():
+                continue
+            region = core_regions.normalize(value)
+            if region is None:
+                raise Unprocessable(f"Unknown region: {value}", code="unknown_region", hint="GET /regions lists them")
+            cleaned.append(region)
+        cleaned = list(dict.fromkeys(cleaned))
         if len(cleaned) > self.s.promo_max_target_regions:
             raise Unprocessable(f"Choose up to {self.s.promo_max_target_regions} regions", code="too_many_regions")
         return cleaned
@@ -1296,7 +1305,7 @@ class PromoService(BaseService):
         if listing.tier != "plus" or listing.status != "active":
             raise Forbidden("Content ideas come with the Plus package", code="plus_required",
                             hint="PATCH /promotions with {\"tier\": \"plus\"}")
-        regions = [region.strip().lower()] if region else (listing.target_regions or ([account.region.lower()] if account.region else []))
+        regions = [core_regions.normalize(region) or region.strip().lower()] if region else (listing.target_regions or ([account.region.lower()] if account.region else []))
         if not regions:
             raise Unprocessable("Choose the regions you want to reach", code="regions_required",
                                 hint="PATCH /promotions with target_regions")

@@ -4,7 +4,8 @@ from typing import Literal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import Active, Any_, Services, ok, ok_page
+from app.api.deps import Active, Anonymous, Any_, Services, ok, ok_page
+from app.core import regions
 from app.core.enums import (
     AgentCommentPolicy, DocumentType, FeedTab, PublicFigureMethod, SignalCategory, SocialPlatform,
 )
@@ -97,6 +98,12 @@ class AppealIn(BaseModel):
 
 
 # --- profile and settings ---------------------------------------------------------------------
+@router.get("/regions", dependencies=[Anonymous])
+async def list_regions():
+    """Every country and territory that can be chosen as a region or target region."""
+    return ok(regions.options())
+
+
 @router.get("/accounts/me")
 async def me(p: Any_, svc: Services):
     return ok(await svc.accounts.me(p.account))

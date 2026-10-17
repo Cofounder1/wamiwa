@@ -6,6 +6,7 @@ from app.core.enums import AccountStatus, AccountType, NotificationType
 from app.core.exceptions import Conflict, Forbidden, Gone, Locked, Unauthorized, Unprocessable
 from app.core.security import SecretFactory
 from app.core.utils import age_on, normalize_handle
+from app.core import regions as core_regions
 from app.infra.rate_limit import HOUR, RateLimitPolicy
 from app.models import Account, CompanyProfile, UserProfile
 from app.services.base import BaseService
@@ -123,7 +124,7 @@ class AuthService(BaseService):
 
         account = await self.repo(Account).add(Account(
             type=account_type, email=email, handle=handle, display_name=name.strip(),
-            password_hash=self.infra.passwords.hash(password), status=status, region=region,
+            password_hash=self.infra.passwords.hash(password), status=status, region=core_regions.normalize(region),
             last_active_at=self.now(),
         ))
         if account_type == AccountType.USER:

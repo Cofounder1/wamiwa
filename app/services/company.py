@@ -11,6 +11,7 @@ from app.core.enums import (
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unauthorized, Unprocessable
 from app.core.security import SecretFactory
 from app.core.utils import Cursor, Page
+from app.core import regions as core_regions
 from app.models import (
     Account, ApiKey, B2BCategoryLink, Comment, CompanyProfile, Contract, Post, QueueItem, UserProfile,
 )
@@ -63,7 +64,10 @@ class CompanyService(BaseService):
             if changes.get(field) is not None:
                 setattr(company, field, bool(changes[field]))
         if changes.get("region_targeting") is not None:
-            company.region_targeting = changes["region_targeting"] or None
+            value = changes["region_targeting"]
+            company.region_targeting = core_regions.normalize(value)
+            if company.region_targeting is None and value.strip():
+                raise Unprocessable(f"Unknown region: {value}", code="unknown_region", hint="GET /regions lists them")
         if changes.get("bio") is not None:
             company.bio = changes["bio"]
         if changes.get("website") is not None:

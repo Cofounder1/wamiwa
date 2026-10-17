@@ -17,6 +17,7 @@ from app.core.enums import (
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
 from app.core.security import SecretFactory
 from app.core.utils import Page, normalize_handle
+from app.core import regions as core_regions
 from app.models import (
     Account, AdminInvite, AdminPermission, AgentProfile, AgentTag, AuditLog, Comment, CompanyProfile,
     Contract, Dispute, EscrowTransaction, GuardianConfirmation, IdentityVerification, Payment, Post,
@@ -303,6 +304,7 @@ class AdminAnalyticsService(BaseService):
     async def _metrics(self, start: datetime, end: datetime, role: str | None, niche: str | None,
                        region: str | None) -> dict[str, Any]:
         account_filter = [Account.type.in_([role] if role else PEOPLE)]
+        region = core_regions.normalize(region) or region
         if region:
             account_filter.append(Account.region == region)
         count = lambda model, *where: self._scalar(select(func.count()).select_from(model).where(*where))  # noqa: E731

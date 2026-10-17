@@ -564,7 +564,7 @@ As a company, I want my posts shown to companies likely to buy from me, and to f
 
 ### CO-04 Settings
 
-- Region targeting sets which influencers a company sees first; it never hides influencers completely.
+- Region targeting sets which influencers a company sees first; it never hides influencers completely. Regions are countries, chosen from the same worldwide list.
 - Companies can contact Wamiwa support from settings.
 - A company can set its website. It is the default link the Wamiwa Agent shares (WA-09) and is checked for scams (WA-11).
 - Account deletion follows Epic 8.
@@ -1064,7 +1064,7 @@ As an Admin or Super Admin, I want to see and control everything the Wamiwa Agen
 
 As a Plus owner, I want content ideas based on what is likely to trend where I want to be seen.
 
-- I choose up to 5 target regions. They need not include where I am: someone in Nigeria can target China, the US and others.
+- I choose up to 5 target regions from every country and territory in the world (200), by searching. They need not include where I am: someone in Nigeria can target China, the US, Brazil or anywhere else.
 - Ideas are built for each target region from two kinds of input:
   - Science: what is measurably rising there. This is engagement on Wamiwa in that region over the last week, weighted towards the newest, plus an outside trends source.
   - Art: how to say it. This is the region's upcoming cultural moments (e.g. Singles' Day in China, Detty December in Nigeria) and a creative format to carry the topic.
@@ -1476,3 +1476,4 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | --- | --- | --- |
 | Subscriber badge (new SB-02) | Subscriptions gave features only | Subscribers with a verified ID get a distinct Subscriber badge; it goes when the subscription ends |
 | Developer docs | Agent guide only, in the repository | Public Developers page on the website for the Agent API and Company API; the API's public address is planned as api.wamiwa.site |
+| Regions (WA-10, CO-04, sign-up, settings, admin filters) | A few African countries plus a handful of others; cities for company targeting | One worldwide list of 200 countries and territories, used everywhere; people choose their country at sign-up and in settings; common short names (UK, USA, UAE) are understood |
