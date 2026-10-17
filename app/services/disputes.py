@@ -259,6 +259,7 @@ class SubscriptionService(BaseService):
         subscription.period, subscription.status = period, SubscriptionStatus.ACTIVE
         subscription.renews_at = still_paid + timedelta(days=days)
         subscription.payment_method, subscription.cancelled_at, subscription.lapse_notice_sent = payment_method, None, False
+        await self.svc.profiles.invalidate(account)  # the subscriber badge shows at once
         return self.present(subscription)
 
     async def cancel(self, account: Account) -> dict[str, Any]:
@@ -271,6 +272,7 @@ class SubscriptionService(BaseService):
     async def _lapse(self, subscription: Subscription) -> None:
         """Extras stop; paid contracts and earnings are never affected."""
         subscription.status = SubscriptionStatus.LAPSED
+        await self.svc.profiles.invalidate(await self.repo(Account).require(subscription.account_id))  # badge goes
         profile = await self.svc.access.profile(subscription.account_id)
         if profile:
             profile.auto_reply_enabled = False

@@ -147,7 +147,8 @@ class ProfileService(BaseService):
                 "is_minor": profile.is_minor,  # internal flag; stripped before returning
                 "badges": [badge for badge, on in (
                     ("id_verified", profile.id_verified), ("verified_creator", profile.is_verified_creator),
-                    ("verified_major_person", profile.is_major_person)) if on],
+                    ("verified_major_person", profile.is_major_person),
+                    ("subscriber", await self.svc.access.has_subscriber_badge(account.id, profile))) if on],
                 "popularity_level": profile.popularity_level,
                 "hire_me": None if not (hire_me and hire_me.available) else {
                     "url": f"/hire-me/{account.handle}", "starting_price_cents": hire_me.starting_price_cents},

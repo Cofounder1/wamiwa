@@ -276,3 +276,25 @@ async def test_reports_support_and_dashboard(api):
     assert "revenue" not in (await api.ok("GET", "/admin/dashboard", mod))["metrics"]
     counts = await api.ok("GET", "/admin/accounts/count", mod)
     assert counts["total_people"] == 3 and counts["companies"] == 1
+
+
+async def test_subscriber_badge_needs_both_a_subscription_and_a_verified_id(api):
+    """SB-02: a paid badge that always means a real, checked person."""
+    user = await api.signup("bolu", name="Bolu Ade")
+    viewer = await api.signup("seyi")
+    await api.ok("POST", "/subscriptions", user, json={"period": "monthly", "payment_method": PAY})
+    me = await api.ok("GET", "/accounts/me", user)
+    assert me["subscribed"] is True and me["subscriber_badge"] is False  # paying alone is not enough
+
+    await api.verify_id(user, "Bolu Ade")
+    assert (await api.ok("GET", "/accounts/me", user))["subscriber_badge"] is True
+    profile = await api.ok("GET", "/profiles/bolu", viewer)
+    assert "subscriber" in profile["badges"] and "id_verified" in profile["badges"]
+
+    # Cancelling keeps the badge until the paid month ends; then it goes with the subscription.
+    await api.ok("DELETE", "/subscriptions", user)
+    assert "subscriber" in (await api.ok("GET", "/profiles/bolu", viewer))["badges"]
+    api.clock.advance(days=31)
+    await api.run("subscriptions.process_renewals")
+    assert "subscriber" not in (await api.ok("GET", "/profiles/bolu", viewer))["badges"]
+    assert (await api.ok("GET", "/accounts/me", user))["subscriber_badge"] is False

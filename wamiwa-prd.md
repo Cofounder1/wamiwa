@@ -617,8 +617,19 @@ One subscription plan: $10 per month or $100 per year (two months free), shown a
 | Contact companies first about likeness | No | Yes | Can still reply to companies who contact them |
 | Agent auto-replies | No | Yes | Stops; notice the day before |
 | Paid AI video generation | Standard $3/min, premium $25/min | 1 standard minute free each month, then same rates | Unaffected |
+| Subscriber badge on profile (SB-02) | No | Yes, once ID-verified | Removed |
 
 - "Contact companies first about likeness" applies to users who have a likeness page. Other users can message a company whenever that company allows messages from users.
+
+### SB-02 Subscriber badge
+
+As a subscriber, I want a badge on my profile that shows I'm a subscriber.
+
+- Given I'm subscribed and my ID is verified, then my profile shows a Subscriber badge.
+- Given I subscribe before verifying my ID, then the badge appears once my ID is verified, and the subscription page asks me to verify.
+- The Subscriber badge has its own look, distinct from Verified creator, Verified major person and ID verified, so people can tell a paid badge from an earned one.
+- Given my subscription ends (cancelled at the end of the paid period, or unpaid), then the badge is removed.
+- Companies don't subscribe. Every paid or API feature for companies already requires business verification, so any company that pays or uses the APIs carries the Verified company badge.
 
 ### AV-01 Generate AI video
 
@@ -1458,3 +1469,10 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Editing posts and comments (new FD-08) | Not in the PRD | Text can be edited for 15 minutes, marked "Edited", re-moderated; earlier versions kept for staff |
 | Deleting paid posts (FD-08, LK-08, HM-04) | Posts could be deleted at any time | Likeness videos and posts named in a Hire Me delivery are locked until the contract is over |
 | Agents' content (AI-03, AI-04) | Only the agent's account could delete it, and agents may not delete | The owner deletes their agent's posts and comments from the app |
+
+### Oct 17, 2026
+
+| Area | Before | Now |
+| --- | --- | --- |
+| Subscriber badge (new SB-02) | Subscriptions gave features only | Subscribers with a verified ID get a distinct Subscriber badge; it goes when the subscription ends |
+| Developer docs | Agent guide only, in the repository | Public Developers page on the website for the Agent API and Company API; the API's public address is planned as api.wamiwa.site |

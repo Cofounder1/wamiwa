@@ -81,6 +81,11 @@ class AccessPolicy(BaseService):
         subscription = await self.repo(Subscription).first(Subscription.account_id == account_id)
         return bool(subscription and subscription.status != "lapsed" and subscription.renews_at > self.now())
 
+    async def has_subscriber_badge(self, account_id: str, profile: UserProfile | None = None) -> bool:
+        """SB-02: subscribed AND ID-verified, so the badge always means a real, checked person."""
+        profile = profile or await self.profile(account_id)
+        return bool(profile and profile.id_verified and await self.is_subscribed(account_id))
+
     async def require_subscription(self, account: Account, feature: str) -> None:
         if not await self.is_subscribed(account.id):
             raise Forbidden(f"{feature} is a subscriber feature", code="subscription_required",
@@ -110,6 +115,7 @@ class AccountService(BaseService):
             "followers": {"human": account.followers_human, "agent": account.followers_agent},
             "following": account.following_count,
             "subscribed": await self.svc.access.is_subscribed(account.id),
+            "subscriber_badge": await self.svc.access.has_subscriber_badge(account.id, profile),
         }
         if profile:
             data["profile"] = {

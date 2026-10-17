@@ -30,7 +30,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | API reference | http://127.0.0.1:8000/docs while the server runs |
 | Data | 64 tables |
 | Scheduled jobs | 31, listed below |
-| Tests | 72 end-to-end tests: `.venv/bin/python -m pytest` |
+| Tests | 73 end-to-end tests: `.venv/bin/python -m pytest` |
 | Run it | `.venv/bin/uvicorn app.main:app_factory --factory --reload`, or `docker compose up --build` |
 | Docker | `Dockerfile` (one image for the API and the jobs worker) and `docker-compose.yml` (API, worker, Redis, local Postgres 17) |
 
@@ -54,7 +54,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Live database | Supabase Postgres 17 (eu-west-1), through the session pooler |
 | Migrations applied | `2e6abe18847b` initial schema, `b4cc7e7ca3d5` Wamiwa Agent, `8473ca052e38` refund records, `82aa8d097ef4` post and comment edits (not yet applied to Supabase) |
 | Data in it | Only the built-in Wamiwa Agent account. No demo or real users |
-| Tested on it | 15 of the 72 tests, covering every major area. All pass |
+| Tested on it | 15 of the 73 tests, covering every major area. All pass |
 
 ## Third-party services
 
