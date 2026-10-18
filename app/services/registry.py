@@ -8,8 +8,9 @@ from __future__ import annotations
 from functools import cached_property
 
 from app.services import (
-    accounts, admin, agents, auth, company, content, contracts, disputes, likeness, messaging,
-    emails, money, notifications, payments, promos, queues, reminders, social, support, trust, verification, video,
+    accounts, admin, agents, auth, company, content, contracts, disputes, emails, growth, insights, likeness,
+    messaging, money, notifications, payments, promos, queues, reminders, social, support, trust,
+    uploads, verification, video,
 )
 from app.services.base import ServiceContext
 
@@ -218,6 +219,22 @@ class ServiceRegistry:
     @cached_property
     def subscriptions(self) -> disputes.SubscriptionService:
         return disputes.SubscriptionService(self._ctx)
+
+    @cached_property
+    def interests(self) -> growth.InterestService:
+        return growth.InterestService(self._ctx)
+
+    @cached_property
+    def growth(self) -> growth.GrowthService:
+        return growth.GrowthService(self._ctx)
+
+    @cached_property
+    def chat_insights(self) -> insights.ChatInsightService:
+        return insights.ChatInsightService(self._ctx)
+
+    @cached_property
+    def uploads(self) -> uploads.UploadService:
+        return uploads.UploadService(self._ctx)
 
     # --- companies, trust -----------------------------------------------------------------------------
     @cached_property

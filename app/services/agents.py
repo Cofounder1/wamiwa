@@ -17,8 +17,9 @@ from app.core.enums import (
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unauthorized, Unprocessable
 from app.core.security import SecretFactory, WebhookSigner
 from app.core.utils import Cursor, Page, normalize_handle
+from app.core import pii
 from app.models import (
-    Account, AgentActivity, AgentEvent, AgentIntegration, AgentProfile, AgentTag, Contract, UserProfile,
+    Account, AgentActivity, AgentEvent, AgentIntegration, AgentProfile, AgentTag, Contract,
 )
 from app.services.base import BaseService, Principal, ServiceContext
 
@@ -472,6 +473,15 @@ class AgentActionService(BaseService):
             raise Forbidden("This agent's owner is not active", code="owner_unavailable")
         return agent
 
+    @staticmethod
+    def _no_personal_info(*texts: str | None) -> None:
+        """AI-05: whatever it is asked, an agent never gives out personal information."""
+        found = sorted({kind for text in texts for kind in pii.find(text)})
+        if found:
+            raise Unprocessable(
+                f"Agents can't share personal information ({', '.join(found)})", code="personal_information",
+                found=found, hint="Remove phone numbers, email addresses and account, ID or card numbers")
+
     async def _log(self, agent_id: str, action: str, target_type: str, target_id: str, event_id: str | None) -> None:
         if event_id:
             event = await self.repo(AgentEvent).get(event_id)
@@ -481,6 +491,7 @@ class AgentActionService(BaseService):
 
     async def post(self, principal: Principal, *, type, text: str, media_ref: str | None, event_id: str | None) -> dict:
         await self._guard(principal)
+        self._no_personal_info(text)
         post = await self.svc.posts.create(principal, type=type, text=text, media_ref=media_ref)
         await self._log(principal.id, "post", "post", post.id, event_id)
         return self.svc.posts.present(post, principal.account)
@@ -488,6 +499,7 @@ class AgentActionService(BaseService):
     async def comment(self, principal: Principal, post_id: str, text: str, parent_id: str | None,
                       on_behalf_of: str | None, event_id: str | None) -> dict:
         await self._guard(principal)
+        self._no_personal_info(text)
         comment = await self.svc.comments.create(principal, post_id, text, parent_id=parent_id,
                                                  on_behalf_of=on_behalf_of, event_id=event_id)
         await self._log(principal.id, "reply" if parent_id else "comment", "comment", comment.id, event_id)
@@ -505,12 +517,14 @@ class AgentActionService(BaseService):
 
     async def update_order_status(self, principal: Principal, order_id: str, note: str, event_id: str | None) -> dict:
         await self._guard(principal)
+        self._no_personal_info(note)
         result = await self.svc.agent_orders.mark_in_progress(principal.account, order_id, note)
         await self._log(principal.id, "order.status", "contract", order_id, event_id)
         return result
 
     async def deliver_order(self, principal: Principal, order_id: str, delivery: str, event_id: str | None) -> dict:
         await self._guard(principal)
+        self._no_personal_info(delivery)
         result = await self.svc.agent_orders.deliver(principal.account, order_id, delivery)
         await self._log(principal.id, "order.deliver", "contract", order_id, event_id)
         return result
@@ -518,6 +532,7 @@ class AgentActionService(BaseService):
     async def order_message(self, principal: Principal, order_id: str, body: str, event_id: str | None) -> dict:
         """Agents talk to hirers only inside the order thread (Epic 10)."""
         await self._guard(principal)
+        self._no_personal_info(body)
         result = await self.svc.messaging.send_order_message(principal.account, order_id, body)
         await self._log(principal.id, "order.message", "contract", order_id, event_id)
         return result

@@ -30,6 +30,7 @@ class Permission(StrEnum):
     B2B_CATEGORY_MAP = "b2b_category_map"
     VIEW_DASHBOARD = "view_dashboard"
     VIEW_REVENUE = "view_revenue"
+    INVESTIGATE = "investigate"  # RP-02: the investigation team decides racism and ethnic-insult reports
 
 
 class FeedTab(StrEnum):
@@ -233,6 +234,7 @@ class PaymentPurpose(StrEnum):
     EXTRA_RENDER = "extra_render"
     ARCON_FILING = "arcon_filing"
     PROMOTION = "promotion"
+    AI_VIDEO_PLAN = "ai_video_plan"  # AV-02
 
 
 class PaymentStatus(StrEnum):
@@ -274,6 +276,7 @@ class ReportReason(StrEnum):
     IMPERSONATION = "impersonation"
     MISUSE_OF_LIKENESS = "misuse_of_likeness"
     MISLABELED_AI = "mislabeled_ai"
+    RACISM_OR_ETHNIC_INSULT = "racism_ethnic_insult"  # RP-02: racism, or insulting Yoruba people
     OTHER = "other"
 
 
@@ -353,6 +356,7 @@ class Queue(StrEnum):
     PAYOUTS = "payouts"
     FAKE_FOLLOWERS = "fake_followers"
     PROMOTIONS = "promotions"
+    INVESTIGATIONS = "investigations"  # RP-02
 
 
 class QueueDecision(StrEnum):

@@ -22,7 +22,9 @@ class IdentityResult:
 
 class IdentityGateway(ABC):
     @abstractmethod
-    async def verify(self, document_type: str, document_ref: str, selfie_ref: str) -> IdentityResult: ...
+    async def verify(self, document_type: str, document_ref: str, selfie_ref: str,
+                     liveness_ref: str | None = None) -> IdentityResult:
+        """`selfie_ref` is a frame from the live camera; `liveness_ref` the short clip of the head turns."""
 
     @abstractmethod
     async def face_matches(self, face_ref: str, photo_ref: str) -> bool: ...

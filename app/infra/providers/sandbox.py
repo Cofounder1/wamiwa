@@ -31,7 +31,8 @@ class SandboxIdentityGateway(IdentityGateway):
 
     PROTECTED_NAMES = {"burna boy", "davido", "wizkid", "tiwa savage", "beyonce"}
 
-    async def verify(self, document_type: str, document_ref: str, selfie_ref: str) -> IdentityResult:
+    async def verify(self, document_type: str, document_ref: str, selfie_ref: str,
+                     liveness_ref: str | None = None) -> IdentityResult:
         parts = [p.strip() for p in document_ref.split("|")]
         flags = {p.lower() for p in parts[2:]}
         if len(parts) < 2:

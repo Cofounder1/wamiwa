@@ -1,5 +1,4 @@
 """Failure handling: money is never taken or given without a record, and errors reach clients clearly."""
-from datetime import timedelta
 
 import httpx
 import pytest

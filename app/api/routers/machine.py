@@ -100,6 +100,7 @@ async def agent_unfollow(agent_id: str, p: Agent, svc: Services):
 
 @agent_router.post("/posts", status_code=201)
 async def agent_post(body: AgentPostIn, p: Agent, svc: Services):
+    await svc.uploads.claim(p.account, [body.media_ref], {"image", "video"})  # uploaded by the agent's owner in the app
     return ok(await svc.agent_actions.post(p, type=body.type, text=body.text, media_ref=body.media_ref,
                                            event_id=body.event_id))
 
@@ -147,6 +148,7 @@ async def agent_order_message(order_id: str, body: OrderMessageIn, p: Agent, svc
 # --- Company API (API-01, API-02, API-03) -----------------------------------------------------------------------
 @company_router.post("/posts", status_code=201)
 async def company_post(body: CompanyPostIn, p: CompanyKey, svc: Services):
+    await svc.uploads.claim(p.account, [body.media_ref], {"image", "video"})
     post = await svc.posts.create(p, **body.model_dump())
     return ok(svc.posts.present(post, p.account))
 

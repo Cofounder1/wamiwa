@@ -214,18 +214,7 @@ class PromoService(BaseService):
         return url
 
     def _regions(self, regions: list[str] | None) -> list[str]:
-        cleaned = []
-        for value in regions or []:
-            if not value.strip():
-                continue
-            region = core_regions.normalize(value)
-            if region is None:
-                raise Unprocessable(f"Unknown region: {value}", code="unknown_region", hint="GET /regions lists them")
-            cleaned.append(region)
-        cleaned = list(dict.fromkeys(cleaned))
-        if len(cleaned) > self.s.promo_max_target_regions:
-            raise Unprocessable(f"Choose up to {self.s.promo_max_target_regions} regions", code="too_many_regions")
-        return cleaned
+        return core_regions.require_many(regions, self.s.promo_max_target_regions)
 
     async def plans(self, account: Account) -> dict[str, Any]:
         agent = await self.ensure_agent()
@@ -1020,7 +1009,7 @@ class PromoService(BaseService):
             post_id=post.id, parent_id=comment.id, thread_id=comment.thread_id, author_account_id=agent.id,
             label=Label.AGENT, text=f"{name.name}: {link.label}.", link=f"/promotions/links/{link.id}/click",
             system_generated=True, sponsored_listing_id=listing.id))
-        post.comments_agent += 1
+        await self.svc.comments.recount(post)
         await self._bump(listing.id, name.id, "agent_replies")
 
     # --- showing cards to a reader --------------------------------------------------------------------
@@ -1305,7 +1294,7 @@ class PromoService(BaseService):
         if listing.tier != "plus" or listing.status != "active":
             raise Forbidden("Content ideas come with the Plus package", code="plus_required",
                             hint="PATCH /promotions with {\"tier\": \"plus\"}")
-        regions = [core_regions.normalize(region) or region.strip().lower()] if region else (listing.target_regions or ([account.region.lower()] if account.region else []))
+        regions = core_regions.require_many([region], 1) if region else (listing.target_regions or ([account.region.lower()] if account.region else []))
         if not regions:
             raise Unprocessable("Choose the regions you want to reach", code="regions_required",
                                 hint="PATCH /promotions with target_regions")
@@ -1318,7 +1307,10 @@ class PromoService(BaseService):
         return await self.cache.get_or_set(f"trendideas:{listing.id}:{day.isoformat()}:{','.join(regions)}", 6 * 3600, load)
 
     async def _ideas_for(self, listing: PromoListing, region: str) -> dict[str, Any]:
-        topic_area = "music" if listing.kind in ("artist", "label") else (listing.category or "")
+        return await self.ideas_for_topic("music" if listing.kind in ("artist", "label") else (listing.category or ""), region)
+
+    async def ideas_for_topic(self, topic_area: str, region: str) -> dict[str, Any]:
+        """Trend-based ideas for one topic area in one region (WA-10 for plans, SB-03 for Pro creators)."""
         signals: dict[str, dict[str, Any]] = {}
 
         # Science 1: what people in that region engaged with on Wamiwa this week, weighted towards the newest.

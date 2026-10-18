@@ -301,7 +301,7 @@ async def test_plus_package_content_ideas_for_target_regions(api):
     r = await api.call("PATCH", "/promotions", brand, json={"target_regions": ["Atlantis"]}, expect=422)
     assert r.json()["code"] == "unknown_region"
     updated = await api.ok("PATCH", "/promotions", brand, json={"target_regions": ["China", "US"]})
-    assert updated["target_regions"] == ["china", "united_states"]  # "US" is stored under its full name and plan["id"] == updated["id"]
+    assert updated["target_regions"] == ["china", "united_states"] and plan["id"] == updated["id"]  # "US" is stored under its full name
 
     # Science: what people in China engaged with on Wamiwa this week...
     poster, liker = await api.signup("meili", region="China"), await api.signup("chen", region="China")

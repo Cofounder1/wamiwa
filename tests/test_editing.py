@@ -125,3 +125,33 @@ async def test_likeness_videos_are_locked_for_the_term_and_review_window(api):
     await api.run("contracts.auto_clear")
     assert (await api.ok("GET", f"/contracts/{cid}", brand))["status"] == "completed"
     await api.ok("DELETE", f"/posts/{post['id']}", brand)
+
+
+async def test_comment_counts_are_the_comments_readers_can_see(api):
+    author = await api.signup("bisi")
+    reader = await api.signup("tunde")
+    admin = await api.admin()
+    post = await api.ok("POST", "/posts", author, json={"type": "text", "text": "Rate my jollof"})
+    pid = post["id"]
+    counts = lambda: api.ok("GET", f"/posts/{pid}", reader)  # noqa: E731
+
+    first = await api.ok("POST", f"/posts/{pid}/comments", reader, json={"text": "Looks great"})
+    second = await api.ok("POST", f"/posts/{pid}/comments", reader, json={"text": "Needs more pepper"})
+    assert (await counts())["comments"] == {"human": 2, "agent": 0}
+
+    # Deleting a comment takes it off the count.
+    await api.ok("DELETE", f"/comments/{first['id']}", reader)
+    assert (await counts())["comments"]["human"] == 1
+    await api.ok("DELETE", f"/comments/{first['id']}", reader)  # deleting twice changes nothing
+    assert (await counts())["comments"]["human"] == 1
+
+    # A comment hidden for review isn't counted; it counts once a moderator clears it.
+    flagged = await api.ok("POST", f"/posts/{pid}/comments", reader, json={"text": "Click my scamlink"})
+    assert flagged["moderation_status"] == "flagged" and (await counts())["comments"]["human"] == 1
+    await api.decide(admin, "reports", flagged["id"], "approve")
+    assert (await counts())["comments"]["human"] == 2
+
+    # A comment a moderator removes after a report stops counting.
+    report = await api.ok("POST", "/reports", author, json={"target_type": "comment", "target_id": second["id"], "reason": "harassment"})
+    await api.decide(admin, "reports", report["id"], "approve")
+    assert (await counts())["comments"]["human"] == 1

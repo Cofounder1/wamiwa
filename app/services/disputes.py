@@ -8,7 +8,7 @@ from app.core.enums import (
 )
 from app.core.exceptions import Conflict, Forbidden, NotFound, PaymentRequired, Unprocessable
 from app.core.utils import add_working_days, pct_of
-from app.models import Account, Contract, Dispute, DisputeEvidence, EscrowTransaction, LedgerEntry, Subscription
+from app.models import Account, Contract, Dispute, DisputeEvidence, LedgerEntry, Subscription
 from app.services.base import BaseService
 
 FREEZABLE = (EscrowState.ACTIVE, EscrowState.DELIVERED, EscrowState.CLEARED)
@@ -214,42 +214,67 @@ class DisputeService(BaseService):
         return bool(contracts)
 
 
-class SubscriptionService(BaseService):
-    """One plan: $10 per month or $100 per year. A lapse only switches off extras (SB-01)."""
+TIERS = ("standard", "pro")
+CREATOR_FEATURES = ["Daily post ideas", "Contact companies first about likeness", "Agent auto-replies",
+                    "1 standard AI video minute free each month", "Subscriber badge (with a verified ID)"]
+PRO_FEATURES = ["Everything in Creator", "Up to 50 businesses to partner with, matched to what you post about",
+                "Trend-based content ideas for up to 5 countries you choose",
+                "Hire agents to summarize your chats (adults)"]
 
-    def _terms(self, period: BillingPeriod) -> tuple[int, int]:
-        return (self.s.subscription_yearly_cents, 365) if period == BillingPeriod.YEARLY else (
-            self.s.subscription_monthly_cents, 30)
+
+class SubscriptionService(BaseService):
+    """Two tiers (SB-01, SB-03): Creator at $10 a month or $100 a year, and Pro at $16 or $160 with
+    everything in Creator plus growth tools. A lapse only switches off extras."""
+
+    def _terms(self, period: BillingPeriod, tier: str = "standard") -> tuple[int, int]:
+        yearly = period == BillingPeriod.YEARLY
+        if tier == "pro":
+            price = self.s.subscription_pro_yearly_cents if yearly else self.s.subscription_pro_monthly_cents
+        else:
+            price = self.s.subscription_yearly_cents if yearly else self.s.subscription_monthly_cents
+        return price, 365 if yearly else 30
 
     async def plans(self) -> dict[str, Any]:
-        monthly, _ = await self.svc.fx.to_local(self.s.subscription_monthly_cents)
-        yearly, rate = await self.svc.fx.to_local(self.s.subscription_yearly_cents)
-        return {
-            "monthly": {"usd_cents": self.s.subscription_monthly_cents, "local": monthly},
-            "yearly": {"usd_cents": self.s.subscription_yearly_cents, "local": yearly, "note": "Two months free"},
-            "currency": self.s.local_currency, "fx_rate": str(rate),
-            "features": ["Daily post ideas", "Contact companies first about likeness", "Agent auto-replies",
-                         "1 standard AI video minute free each month"],
-        }
+        rate = None
+        tiers = {}
+        for tier, name, features in (("standard", "Creator", CREATOR_FEATURES), ("pro", "Pro", PRO_FEATURES)):
+            monthly_cents, _ = self._terms(BillingPeriod.MONTHLY, tier)
+            yearly_cents, _ = self._terms(BillingPeriod.YEARLY, tier)
+            monthly, _ = await self.svc.fx.to_local(monthly_cents)
+            yearly, rate = await self.svc.fx.to_local(yearly_cents)
+            tiers[tier] = {"name": name, "features": features,
+                           "monthly": {"usd_cents": monthly_cents, "local": monthly},
+                           "yearly": {"usd_cents": yearly_cents, "local": yearly, "note": "Two months free"}}
+        standard = tiers["standard"]
+        # The flat fields are the Creator tier, as before, so older screens keep working.
+        return {"monthly": standard["monthly"], "yearly": standard["yearly"], "features": CREATOR_FEATURES,
+                "tiers": tiers, "currency": self.s.local_currency, "fx_rate": str(rate)}
 
     def present(self, subscription: Subscription | None) -> dict[str, Any]:
         if subscription is None:
             return {"subscribed": False, "status": None}
         active = subscription.status != SubscriptionStatus.LAPSED and subscription.renews_at > self.now()
         return {"subscribed": active, "status": subscription.status, "period": subscription.period,
+                "tier": subscription.tier, "next_tier": subscription.next_tier,
+                "target_regions": subscription.target_regions or [],
                 "renews_at": subscription.renews_at.isoformat(),
                 "ends_at": subscription.renews_at.isoformat() if subscription.status == SubscriptionStatus.CANCELLED else None}
 
     async def status(self, account: Account) -> dict[str, Any]:
         return self.present(await self.repo(Subscription).first(Subscription.account_id == account.id))
 
-    async def subscribe(self, account: Account, period: BillingPeriod, payment_method: str) -> dict[str, Any]:
+    async def subscribe(self, account: Account, period: BillingPeriod, payment_method: str,
+                        tier: str = "standard") -> dict[str, Any]:
         if not account.is_user:
             raise Unprocessable("Subscriptions are for user accounts", code="not_a_user")
+        if tier not in TIERS:
+            raise Unprocessable("Choose standard or pro", code="invalid_tier")
         subscription = await self.repo(Subscription).first(Subscription.account_id == account.id)
         if subscription and subscription.status == SubscriptionStatus.ACTIVE and subscription.renews_at > self.now():
+            if subscription.tier != tier:
+                return await self.change_tier(account, tier, payment_method)
             raise Conflict("You are already subscribed", code="already_subscribed")
-        price, days = self._terms(period)
+        price, days = self._terms(period, tier)
         await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, price, payment_method)
         if subscription is None:
             subscription = await self.repo(Subscription).add(Subscription(
@@ -257,9 +282,33 @@ class SubscriptionService(BaseService):
                 payment_method=payment_method))
         still_paid = subscription.renews_at if subscription.renews_at > self.now() else self.now()
         subscription.period, subscription.status = period, SubscriptionStatus.ACTIVE
+        subscription.tier, subscription.next_tier = tier, None
         subscription.renews_at = still_paid + timedelta(days=days)
         subscription.payment_method, subscription.cancelled_at, subscription.lapse_notice_sent = payment_method, None, False
         await self.svc.profiles.invalidate(account)  # the subscriber badge shows at once
+        return self.present(subscription)
+
+    async def change_tier(self, account: Account, tier: str, payment_method: str) -> dict[str, Any]:
+        """Upgrading starts now and costs only the difference for the days left; downgrading takes
+        effect at the next renewal, so nothing already paid for is lost."""
+        if tier not in TIERS:
+            raise Unprocessable("Choose standard or pro", code="invalid_tier")
+        subscription = await self.repo(Subscription).first(Subscription.account_id == account.id)
+        if subscription is None or subscription.status != SubscriptionStatus.ACTIVE or subscription.renews_at <= self.now():
+            raise NotFound("You have no active subscription")
+        if tier == subscription.tier:
+            subscription.next_tier = None  # undo a pending downgrade
+            return self.present(subscription)
+        period = BillingPeriod(subscription.period)
+        if tier == "pro":
+            new_price, days = self._terms(period, "pro")
+            old_price, _ = self._terms(period, "standard")
+            left = (subscription.renews_at - self.now()).total_seconds() / (days * 86400)
+            difference = max(1, round((new_price - old_price) * min(1.0, left)))
+            await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, difference, payment_method)
+            subscription.tier, subscription.next_tier, subscription.payment_method = "pro", None, payment_method
+        else:
+            subscription.next_tier = tier
         return self.present(subscription)
 
     async def cancel(self, account: Account) -> dict[str, Any]:
@@ -288,7 +337,9 @@ class SubscriptionService(BaseService):
         renewed = lapsed = 0
         for subscription in due:
             account = await self.repo(Account).require(subscription.account_id)
-            price, days = self._terms(BillingPeriod(subscription.period))
+            if subscription.next_tier:  # a downgrade chosen during the last period starts now
+                subscription.tier, subscription.next_tier = subscription.next_tier, None
+            price, days = self._terms(BillingPeriod(subscription.period), subscription.tier)
             if subscription.status == SubscriptionStatus.ACTIVE and account.is_active:
                 try:
                     await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, price, subscription.payment_method)

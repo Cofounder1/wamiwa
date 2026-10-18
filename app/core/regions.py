@@ -66,5 +66,27 @@ def normalize(value: str | None) -> str | None:
     return key if key in REGIONS else None
 
 
+def require(value: str | None) -> str | None:
+    """The canonical key, None for an empty value, or a clear error for anything that isn't a known region."""
+    from app.core.exceptions import Unprocessable
+
+    if value is None or not value.strip():
+        return None
+    region = normalize(value)
+    if region is None:
+        raise Unprocessable(f"Unknown region: {value}", code="unknown_region", hint="GET /regions lists them")
+    return region
+
+
+def require_many(values: list[str] | None, limit: int) -> list[str]:
+    """Several regions (target regions), checked, without repeats, at most `limit`."""
+    from app.core.exceptions import Unprocessable
+
+    cleaned = list(dict.fromkeys(r for r in (require(v) for v in values or []) if r))
+    if len(cleaned) > limit:
+        raise Unprocessable(f"Choose up to {limit} regions", code="too_many_regions")
+    return cleaned
+
+
 def options() -> list[dict[str, str]]:
     return [{"id": key, "name": name} for key, name in sorted(REGIONS.items(), key=lambda kv: kv[1])]

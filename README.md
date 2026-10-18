@@ -10,7 +10,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env
 .venv/bin/uvicorn app.main:app_factory --factory --reload     # http://localhost:8000/docs
 .venv/bin/python -m app.cli create-super-admin you@company.com yourhandle   # run for two people
-.venv/bin/python -m pytest                                    # 74 end-to-end tests
+.venv/bin/python -m pytest                                    # 89 end-to-end tests
 ```
 
 Development uses SQLite and an in-process key-value store, so nothing else needs installing.

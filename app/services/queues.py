@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy import func, select, update
 
-from app.core.enums import AccountType, NotificationType, Queue, QueueDecision
+from app.core.enums import AccountType, NotificationType, Permission, Queue, QueueDecision
 from app.core.exceptions import Conflict, Forbidden, Unprocessable
 from app.core.utils import Page, add_working_days
 from app.models import Account, AuditLog, QueueItem
@@ -21,6 +21,7 @@ QUEUE_TARGETS: dict[Queue, tuple[str, int]] = {
     Queue.PAYOUTS: ("working_days", 1),
     Queue.FAKE_FOLLOWERS: ("working_days", 3),
     Queue.PROMOTIONS: ("working_days", 2),
+    Queue.INVESTIGATIONS: ("hours", 24),
 }
 LOW_SEVERITY_REPORT_HOURS = 48
 
@@ -120,6 +121,8 @@ class QueueService(BaseService):
             raise Conflict("This item has already been decided", code="already_decided")
         if item.escalated and not admin.is_super_admin:
             raise Forbidden("This item was escalated to a Super Admin", code="escalated")
+        if item.queue == Queue.INVESTIGATIONS:  # RP-02: only the investigation team
+            await self.svc.admin.require_permission(admin, Permission.INVESTIGATE)
         await self._guard_subject(admin, item)
         result = await self.db.execute(
             update(QueueItem)
@@ -146,6 +149,8 @@ class QueueService(BaseService):
             raise Conflict("This item has already been decided", code="already_decided")
         if item.claimed_by != admin.id:
             raise Conflict("Claim this item before deciding it", code="not_claimed")
+        if item.queue == Queue.INVESTIGATIONS:
+            await self.svc.admin.require_permission(admin, Permission.INVESTIGATE)
         await self._guard_subject(admin, item)
         await self.svc.audit.log(admin.id, f"queue.{item.queue}.{decision}", item.target_type, item.target_id,
                                  reason, queue_item_id=item.id)
@@ -180,6 +185,7 @@ class QueueService(BaseService):
             Queue.PAYOUTS: self.svc.payouts.apply_review,
             Queue.FAKE_FOLLOWERS: self.svc.creators.apply_review,
             Queue.PROMOTIONS: self.svc.promos.apply_review,
+            Queue.INVESTIGATIONS: self.svc.reports.apply_investigation,
         }
 
     async def close_for_target(self, queue: Queue, target_id: str, decision: str, admin_id: str, reason: str) -> None:

@@ -124,7 +124,9 @@ class Subscription(Model):
     __tablename__ = "subscriptions"
 
     account_id: Mapped[str] = mapped_column(ForeignKey(FK_ACCOUNT), unique=True)
-    tier: Mapped[str] = mapped_column(String(16), default="standard")
+    tier: Mapped[str] = mapped_column(String(16), default="standard")  # standard (Creator) | pro
+    next_tier: Mapped[str | None] = mapped_column(String(16))  # a downgrade waiting for the next renewal
+    target_regions: Mapped[list | None] = mapped_column(JSON)  # Pro: where they want content ideas for
     period: Mapped[str] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(10), default=SubscriptionStatus.ACTIVE, index=True)
     started_at: Mapped[datetime] = mapped_column(UTCDateTime)

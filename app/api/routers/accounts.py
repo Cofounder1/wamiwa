@@ -64,6 +64,7 @@ class IdentityIn(BaseModel):
     document_type: DocumentType
     document_ref: str = Ref
     selfie_ref: str = Ref
+    liveness_ref: str | None = Field(default=None, max_length=255, description="The live camera clip")
 
 
 class BankIn(BaseModel):
@@ -111,6 +112,7 @@ async def me(p: Any_, svc: Services):
 
 @router.patch("/accounts/me/profile")
 async def update_profile(body: ProfileIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, [body.photo], {"image"})
     return ok(await svc.accounts.update_profile(p.account, body.model_dump(exclude_unset=True)))
 
 
@@ -278,7 +280,10 @@ async def unblock(account_id: str, p: Active, svc: Services):
 # --- verification (ON-05 to ON-08) ---------------------------------------------------------------------------
 @router.post("/verification/identity")
 async def submit_identity(body: IdentityIn, p: Active, svc: Services):
-    return ok(await svc.identity.submit(p.account, body.document_type, body.document_ref, body.selfie_ref))
+    await svc.uploads.claim(p.account, [body.document_ref], {"id_document"})
+    await svc.uploads.claim(p.account, [body.selfie_ref, body.liveness_ref], {"liveness"})  # taken live, never a saved photo
+    return ok(await svc.identity.submit(p.account, body.document_type, body.document_ref, body.selfie_ref,
+                                        body.liveness_ref))
 
 
 @router.get("/verification/identity")
@@ -309,11 +314,13 @@ async def social_accounts(p: Active, svc: Services):
 
 @router.post("/verification/public-figure")
 async def request_public_figure(body: PublicFigureIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, body.evidence, {"document", "image", "video"}, allow_links=True)
     return ok(await svc.popularity.request_major_person(p.account, body.method, body.evidence))
 
 
 @router.post("/verification/popularity/signals", status_code=201)
 async def submit_popularity_signal(body: SignalIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, [body.evidence_ref], {"document", "image"}, allow_links=True)
     return ok(await svc.popularity.submit_signal(p.account, body.category, body.title, body.evidence_ref))
 
 

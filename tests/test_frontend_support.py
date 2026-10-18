@@ -47,12 +47,61 @@ async def test_uploads_by_kind(api, tmp_path):
     r = await api.call("POST", "/uploads", user, data={"kind": "image"}, files=files, expect=422)
     assert r.json()["code"] == "file_too_large" and not any(tmp_path.rglob("*.part"))
     # ID documents are stored but never served back.
-    doc = await api.ok("POST", "/uploads", user, data={"kind": "id_document"}, files={"file": ("id.png", b"\x89PNG" + b"0" * 10, "image/png")})
+    doc = await api.ok("POST", "/uploads", user, data={"kind": "id_document"}, files={"file": ("id.png", b"\x89PNG\r\n\x1a\n" + b"0" * 10, "image/png")})
     assert doc["url"] is None
     await api.call("GET", f"/media/{doc['ref']}", expect=404)
     await api.call("GET", "/media/image/../../etc/passwd", expect=404)
     # Uploading needs a login.
     await api.call("POST", "/uploads", data={"kind": "image"}, files=files, expect=401)
+
+
+async def test_uploads_are_checked_owned_and_cleaned_up(api, tmp_path):
+    api.infra.settings.upload_dir = str(tmp_path)
+    owner, other = await api.signup("ada", name="Ada Obi"), await api.signup("bola")
+    jpeg = {"file": ("look.jpg", b"\xff\xd8\xff" + b"0" * 64, "image/jpeg")}
+    # The file's own bytes must match the type it claims, and an empty file is refused.
+    page = {"file": ("look.jpg", b"<html><script>alert(1)</script></html>", "image/jpeg")}
+    r = await api.call("POST", "/uploads", owner, data={"kind": "image"}, files=page, expect=422)
+    assert r.json()["code"] == "file_content_mismatch"
+    r = await api.call("POST", "/uploads", owner, data={"kind": "image"}, files={"file": ("e.jpg", b"", "image/jpeg")}, expect=422)
+    assert r.json()["code"] == "empty_file"
+
+    photo = await api.ok("POST", "/uploads", owner, data={"kind": "image"}, files=jpeg)
+    served = await api.call("GET", photo["url"], expect=200)
+    assert served.headers["x-content-type-options"] == "nosniff" and "sandbox" in served.headers["content-security-policy"]
+
+    # Only the uploader can use a file, and only where that kind of file belongs.
+    r = await api.call("POST", "/posts", other, json={"type": "video", "media_ref": photo["ref"]}, expect=404)
+    assert r.json()["code"] == "file_not_found"
+    r = await api.call("PATCH", "/accounts/me/profile", owner, json={"photo": "image/" + "0" * 32 + ".jpg"}, expect=404)
+    r = await api.call("POST", "/verification/identity", owner, json={
+        "document_type": "passport", "document_ref": "Ada Obi|1990-05-01", "selfie_ref": photo["ref"]}, expect=422)
+    assert r.json()["code"] == "wrong_file_kind"  # a saved photo is not a live check
+    await api.ok("PATCH", "/accounts/me/profile", owner, json={"photo": photo["ref"]})
+
+    # A file nobody used is deleted after a day; a used one stays.
+    unused = await api.ok("POST", "/uploads", owner, data={"kind": "image"}, files=jpeg)
+    api.clock.advance(hours=25)
+    assert await api.run("uploads.purge_unused") == 1
+    assert not (tmp_path / unused["ref"]).exists() and (tmp_path / photo["ref"]).exists()
+
+    # Closing an account deletes its files, not just the references to them.
+    await api.ok("POST", "/accounts/me/deletion", owner, json={})
+    api.clock.advance(days=31)
+    await api.run("deletion.purge_due")
+    assert not (tmp_path / photo["ref"]).exists()
+
+
+async def test_the_live_site_refuses_files_that_were_not_uploaded(api):
+    user = await api.signup("ada")
+    api.infra.settings.env = "production"  # only the file rule is being checked here
+    try:
+        r = await api.call("POST", "/posts", user, json={"type": "video", "media_ref": "v/made-up.mp4"}, expect=422)
+        assert r.json()["code"] == "invalid_file_ref"
+        await api.ok("POST", "/verification/popularity/signals", user, json={  # a link is fine where proof can be one
+            "category": "recognition", "title": "Headies 2025", "evidence_ref": "https://headies.example.com/winners"})
+    finally:
+        api.infra.settings.env = "development"
 
 
 async def test_development_sign_in_code():

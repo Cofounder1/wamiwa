@@ -19,7 +19,7 @@ from app.core.security import SecretFactory
 from app.core.utils import Page, normalize_handle
 from app.core import regions as core_regions
 from app.models import (
-    Account, AdminInvite, AdminPermission, AgentProfile, AgentTag, AuditLog, Comment, CompanyProfile,
+    Account, AdminInvite, AdminPermission, AgentTag, AuditLog, Comment, CompanyProfile,
     Contract, Dispute, EscrowTransaction, GuardianConfirmation, IdentityVerification, Payment, Post,
     PublicFigureVerification, Report, Subscription, UserProfile,
 )
@@ -437,18 +437,27 @@ class AdminAnalyticsService(BaseService):
             select(func.coalesce(func.sum(Payment.amount_local), 0)).where(
                 Payment.purpose == PaymentPurpose.SUBSCRIPTION, Payment.created_at >= start, Payment.created_at < end))
         active = (await self.db.execute(
-            select(Subscription.period, func.count()).where(
+            select(Subscription.period, Subscription.tier, func.count()).where(
                 Subscription.status != SubscriptionStatus.LAPSED, Subscription.renews_at > end)
-            .group_by(Subscription.period))).all()
-        by_period = {str(p): int(n) for p, n in active}
-        mrr_cents = by_period.get("monthly", 0) * self.s.subscription_monthly_cents + round(
-            by_period.get("yearly", 0) * self.s.subscription_yearly_cents / 12)
+            .group_by(Subscription.period, Subscription.tier))).all()
+        mrr_cents = 0
+        subscribers_by_tier: dict[str, int] = {}
+        for period, tier, n in active:  # each tier at its own price; yearly plans spread over 12 months
+            pro = tier == "pro"
+            if str(period) == "yearly":
+                price = self.s.subscription_pro_yearly_cents if pro else self.s.subscription_yearly_cents
+                mrr_cents += round(int(n) * price / 12)
+            else:
+                mrr_cents += int(n) * (self.s.subscription_pro_monthly_cents if pro else self.s.subscription_monthly_cents)
+            key = "pro" if pro else "creator"
+            subscribers_by_tier[key] = subscribers_by_tier.get(key, 0) + int(n)
         return {
             "currency": self.s.local_currency, "gross_escrow_value": gross_local,
             "gross_escrow_value_usd": round(gross_cents / 100, 2),
             "fees_by_type": {str(k): int(v) for k, v in fees.items()},
             "subscription_revenue": subscription_revenue, "mrr_usd": round(mrr_cents / 100, 2),
-            "paying_subscribers": sum(by_period.values()), "refunds": refunds,
+            "subscribers_by_tier": subscribers_by_tier,
+            "paying_subscribers": sum(subscribers_by_tier.values()), "refunds": refunds,
         }
 
     async def _wamiwa_agent(self, start: datetime, end: datetime) -> dict[str, Any]:

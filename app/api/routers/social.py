@@ -52,6 +52,14 @@ class DirectMessageIn(MessageIn):
     recipient_id: str
 
 
+class ChatInsightIn(BaseModel):
+    conversation_id: str
+    agent_id: str
+    kind: Literal["summary", "insights"] = "summary"
+    question: str | None = Field(default=None, max_length=500)
+    payment_method: str = Field(min_length=1, max_length=64)
+
+
 class ReportIn(BaseModel):
     target_type: ReportTarget
     target_id: str
@@ -81,6 +89,25 @@ async def feed(p: Active, svc: Services, tab: FeedTab | None = None, filter: Lit
     return ok_page(page, tab=shown_tab)
 
 
+@router.get("/chat-insights/agents")
+async def chat_insight_agents(p: Active, svc: Services):
+    """MS-05: marketplace agents that offer chat summaries, for Pro subscribers and paying businesses."""
+    return ok(await svc.chat_insights.agents(p.account))
+
+
+@router.post("/chat-insights", status_code=201)
+async def order_chat_insight(body: ChatInsightIn, p: Active, svc: Services):
+    """Hire an agent to summarize a chat or draw insights from it. Personal details are removed first."""
+    return ok(await svc.chat_insights.order(p.account, body.conversation_id, body.agent_id, body.kind,
+                                            body.question, body.payment_method))
+
+
+@router.get("/feed/for-you")
+async def feed_for_you(p: Active, svc: Services, limit: int = Query(default=20, ge=1, le=50)):
+    """FD-09: recent posts from businesses and people in your topics, for everyone."""
+    return ok(await svc.growth.for_you(p.account, limit))
+
+
 @router.get("/posts/compose/suggestions")
 async def compose_suggestions(p: Active, svc: Services):
     return ok(await svc.posts.compose_suggestions(p.account))
@@ -88,6 +115,7 @@ async def compose_suggestions(p: Active, svc: Services):
 
 @router.post("/posts", status_code=201)
 async def create_post(body: PostIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, [body.media_ref], {"image", "video"})
     post = await svc.posts.create(p, **body.model_dump())
     return ok(svc.posts.present(post, p.account))
 
@@ -202,8 +230,17 @@ async def conversations(p: Active, svc: Services, tab: ChatTab = ChatTab.PRIMARY
     return ok_page(await svc.messaging.conversations(p.account, tab, cursor, limit))
 
 
+ATTACHMENT_UPLOAD_KIND = {"image": "image", "video": "video", "voice": "voice_note", "document": "document"}
+
+
+async def _claim_attachments(svc, account, attachments: list[Attachment]) -> None:
+    for attachment in attachments:
+        await svc.uploads.claim(account, [attachment.ref], {ATTACHMENT_UPLOAD_KIND[attachment.kind]})
+
+
 @router.post("/messages", status_code=201)
 async def send_direct_message(body: DirectMessageIn, p: Active, svc: Services):
+    await _claim_attachments(svc, p.account, body.attachments)
     return ok(await svc.messaging.send_direct(p.account, body.recipient_id, body.body,
                                               [a.model_dump() for a in body.attachments]))
 
@@ -216,6 +253,7 @@ async def conversation_messages(conversation_id: str, p: Active, svc: Services, 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)
 async def send_message(conversation_id: str, body: MessageIn, p: Active, svc: Services):
+    await _claim_attachments(svc, p.account, body.attachments)
     return ok(await svc.messaging.send_in_conversation(p.account, conversation_id, body.body,
                                                        [a.model_dump() for a in body.attachments]))
 
@@ -250,6 +288,7 @@ async def help_centre(svc: Services):
 
 @router.post("/support/tickets", status_code=201)
 async def open_ticket(body: TicketIn, p: Any_, svc: Services):
+    await svc.uploads.claim(p.account, body.attachments, {"image", "video", "document"})
     return ok(await svc.support.create(p.account, **body.model_dump()))
 
 
@@ -265,4 +304,5 @@ async def get_ticket(ticket_id: str, p: Any_, svc: Services):
 
 @router.post("/support/tickets/{ticket_id}/replies")
 async def reply_to_ticket(ticket_id: str, body: TicketReplyIn, p: Any_, svc: Services):
+    await svc.uploads.claim(p.account, body.attachments, {"image", "video", "document"})
     return ok(await svc.support.reply(p.account, ticket_id, body.body, body.attachments))

@@ -298,3 +298,46 @@ async def test_subscriber_badge_needs_both_a_subscription_and_a_verified_id(api)
     await api.run("subscriptions.process_renewals")
     assert "subscriber" not in (await api.ok("GET", "/profiles/bolu", viewer))["badges"]
     assert (await api.ok("GET", "/accounts/me", user))["subscriber_badge"] is False
+
+
+async def test_monthly_ai_video_plan_counts_each_started_two_minutes(api):
+    user = await api.influencer("maker", "Maker Person")
+    plan = await api.ok("GET", "/ai-videos/plan", user)
+    assert not plan["active"] and plan["terms"] == {"price_cents": 30_00, "videos": 15, "minutes_per_video": 2, "quality": "standard"}
+    charges = api.infra.providers.payments.charges
+    before = set(charges)
+    plan = await api.ok("POST", "/ai-videos/plan", user, json={"payment_method": PAY})
+    assert plan["active"] and plan["videos_left"] == 15
+    assert [charges[r][0] for r in set(charges) - before] == [kobo(30_00)]
+
+    # Up to 2 minutes is one video; a 5-minute video uses 3 (2 + 2 + 1). Nothing is charged.
+    quote = await api.ok("GET", "/ai-videos/quote?seconds=300&tier=standard", user)
+    assert quote["plan_videos_applied"] == 3 and quote["price_cents"] == 0
+    five = await api.ok("POST", "/ai-videos", user, json={"script": "A five minute story", "seconds": 300})
+    assert five["charged_cents"] == 0 and five["plan_videos_used"] == 3
+    two = await api.ok("POST", "/ai-videos", user, json={"script": "Quick tip", "seconds": 120})
+    assert two["plan_videos_used"] == 1
+    assert (await api.ok("GET", "/ai-videos/plan", user))["videos_left"] == 11
+
+    # Premium isn't on the plan: always per minute.
+    assert (await api.ok("GET", "/ai-videos/quote?seconds=60&tier=premium", user))["price_cents"] == 25_00
+    # A video that fails gives its plan videos back.
+    failed = await api.ok("POST", "/ai-videos", user, json={"script": "[fail] broken", "seconds": 200})
+    assert failed["status"] == "failed" and (await api.ok("GET", "/ai-videos/plan", user))["videos_left"] == 11
+
+    # When the plan can't cover a video, it's priced per minute as usual.
+    for _ in range(2):
+        await api.ok("POST", "/ai-videos", user, json={"script": "Long story", "seconds": 600})  # 5 videos each
+    assert (await api.ok("GET", "/ai-videos/plan", user))["videos_left"] == 1
+    over = await api.ok("GET", "/ai-videos/quote?seconds=180&tier=standard", user)
+    assert over["plan_videos_applied"] == 0 and over["price_cents"] == 9_00
+
+    # The month renews with 15 again (unused ones don't carry over); cancelling stops it at the month's end.
+    api.clock.advance(days=30, minutes=1)
+    await api.run("ai_video_plans.renew_due")
+    assert (await api.ok("GET", "/ai-videos/plan", user))["videos_left"] == 15
+    cancelled = await api.ok("DELETE", "/ai-videos/plan", user)
+    assert cancelled["active"] and cancelled["cancel_at_period_end"]
+    api.clock.advance(days=30, minutes=1)
+    await api.run("ai_video_plans.renew_due")
+    assert not (await api.ok("GET", "/ai-videos/plan", user))["active"]

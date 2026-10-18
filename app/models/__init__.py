@@ -4,7 +4,7 @@ from app.models.accounts import (
 )
 from app.models.base import Base, Model
 from app.models.contracts import (
-    BrandVideoPlan, Contract, GeneratedVideo, GuardianConfirmation, HireMePage, LikenessAsset,
+    BrandVideoPlan, Contract, CreatorVideoPlan, GeneratedVideo, GuardianConfirmation, HireMePage, LikenessAsset,
     LikenessConsent, LikenessPage, Script, ScriptChangeRequest, VideoProduction,
 )
 from app.models.finance import (
@@ -13,7 +13,7 @@ from app.models.finance import (
 from app.models.platform import (
     AdminInvite, AdminPermission, ApiKey, AuditLog, B2BCategoryLink, Conversation,
     ConversationParticipant, Message, Notification, QueueItem, ReconciliationRun, Report,
-    SupportTicket, TicketMessage,
+    SupportTicket, TicketMessage, Upload,
 )
 from app.models.promo import (
     PromoCategoryKeyword, PromoClaim, PromoDailyStat, PromoLink, PromoListing, PromoMatch, PromoName,

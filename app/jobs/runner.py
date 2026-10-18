@@ -39,6 +39,7 @@ JOBS: tuple[Job, ...] = (
     Job("videos.poll_processing", MINUTE, lambda s: s.videos.poll_processing()),
     Job("videos.auto_approve", 10 * MINUTE, lambda s: s.videos.auto_approve()),
     Job("video_plans.renew_due", HOUR, lambda s: s.video_plans.renew_due()),
+    Job("ai_video_plans.renew_due", HOUR, lambda s: s.videos.renew_personal_plans()),
     # Disputes
     Job("disputes.close_evidence_windows", HOUR, lambda s: s.disputes.close_evidence_windows()),
     Job("disputes.apply_unappealed", HOUR, lambda s: s.disputes.apply_unappealed()),
@@ -62,6 +63,7 @@ JOBS: tuple[Job, ...] = (
     Job("creators.recheck_due", DAY, lambda s: s.creators.recheck_due()),
     Job("popularity.queue_due_reviews", DAY, lambda s: s.popularity.queue_due_reviews()),
     Job("deletion.purge_due", DAY, lambda s: s.deletion.purge_due()),
+    Job("uploads.purge_unused", DAY, lambda s: s.uploads.purge_unused()),
 )
 
 

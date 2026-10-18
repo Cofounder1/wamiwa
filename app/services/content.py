@@ -127,6 +127,7 @@ class PostService(BaseService):
         if mislabeled:
             await self.register_mislabel(author, post.id)
         await self.cache.invalidate_prefix("feed:")
+        await self.cache.delete(f"interests:{author.id}")  # what they post about shapes For you and Pro suggestions
         if not likeness_contract_id:
             await self.svc.promos.scan(principal, post)
         return post
@@ -449,11 +450,7 @@ class CommentService(BaseService):
         ))
         if comment.thread_id is None:
             comment.thread_id = comment.id
-        # Only comments typed by people count as human engagement (it feeds pricing and thresholds).
-        if label == Label.HUMAN:
-            post.comments_human += 1
-        else:
-            post.comments_agent += 1
+        await self.recount(post)
         if moderation.flagged:
             await self.svc.queues.enqueue(Queue.REPORTS, "comment", comment.id, subject_account_id=author.id,
                                           summary=f"Auto-flagged comment: {moderation.reason}")
@@ -563,8 +560,7 @@ class CommentService(BaseService):
                     post_id=comment.post_id, parent_id=comment.id, thread_id=comment.thread_id,
                     author_account_id=agent.id, label=Label.AGENT, text=FREE_TAG_UNAVAILABLE,
                     system_generated=True, link=f"/marketplace/agents/{agent.id}"))
-                post = await self.repo(Post).require(comment.post_id)
-                post.comments_agent += 1
+                await self.recount(await self.repo(Post).require(comment.post_id))
             return await self.repo(AgentTag).add(tag)
 
         event = await self.svc.webhooks.emit(agent.id, EventType.TAG_CREATED, {
@@ -672,6 +668,7 @@ class CommentService(BaseService):
         comment.flagged_vulgar, comment.moderation_reason = moderation.vulgar, moderation.reason
         if moderation.flagged:
             comment.moderation_status = ModerationStatus.FLAGGED
+            await self.recount(post)  # hidden for review, so no longer counted
             await self.svc.queues.enqueue(Queue.REPORTS, "comment", comment.id, subject_account_id=account.id,
                                           summary=f"Auto-flagged edited comment: {moderation.reason}")
             return comment
@@ -687,6 +684,18 @@ class CommentService(BaseService):
             raise Forbidden("You can't delete this comment")
         if comment.deleted_at is None:
             comment.deleted_at = self.now()
+            await self.recount(await self.repo(Post).require(comment.post_id))
+
+    async def recount(self, post: Post) -> None:
+        """A post's comment counts are the comments readers can see: not deleted, not hidden for review,
+        not removed. Recounted from the comments themselves whenever one changes, so they never drift.
+        Only comments typed by people count as human engagement (it feeds pricing and thresholds)."""
+        rows = (await self.db.execute(
+            select(Comment.label == Label.HUMAN, func.count()).where(
+                Comment.post_id == post.id, Comment.deleted_at.is_(None),
+                Comment.moderation_status == ModerationStatus.VISIBLE).group_by(Comment.label == Label.HUMAN))).all()
+        counts = {bool(human): n for human, n in rows}
+        post.comments_human, post.comments_agent = counts.get(True, 0), counts.get(False, 0)
 
     async def rate(self, account: Account, comment_id: str, helpful: bool) -> dict[str, Any]:
         """Humans rate agent comments as helpful or not (success metric)."""

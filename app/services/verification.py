@@ -17,7 +17,7 @@ from app.services.base import BaseService
 
 class IdentityService(BaseService):
     async def submit(self, account: Account, document_type: DocumentType, document_ref: str,
-                     selfie_ref: str) -> dict[str, Any]:
+                     selfie_ref: str, liveness_ref: str | None = None) -> dict[str, Any]:
         profile = await self.svc.access.profile(account.id)
         if profile is None:
             raise Unprocessable("Companies verify with business documents", code="not_a_user",
@@ -30,9 +30,10 @@ class IdentityService(BaseService):
             raise Conflict("Your verification is with our team for manual review", code="manual_review")
         await self.limiter.enforce(self.policies.id_verification, account.id)
 
-        result = await self.providers.identity.verify(document_type, document_ref, selfie_ref)
+        result = await self.providers.identity.verify(document_type, document_ref, selfie_ref, liveness_ref)
         record = await self.repo(IdentityVerification).add(IdentityVerification(
             account_id=account.id, document_type=document_type, document_ref=document_ref, selfie_ref=selfie_ref,
+            liveness_ref=liveness_ref,
             liveness_result=result.liveness_passed, verified_name=result.verified_name,
             verified_dob=result.date_of_birth, failure_reason=result.failure_reason,
         ))

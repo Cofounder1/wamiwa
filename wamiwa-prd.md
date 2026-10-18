@@ -115,7 +115,8 @@ As a user, I want to complete my profile with my niche and personal details.
 
 As an influencer, I want to verify my identity so I can earn on Wamiwa.
 
-- Accepted ID: National ID card, driver's licence, or international passport, plus a liveness selfie.
+- Accepted ID: National ID card, driver's licence, or international passport, plus a live check.
+- The live check uses the camera there and then: the person looks straight, turns left, then right, while a short clip records; a frame from it is matched to the ID photo. A saved photo can't be uploaded instead. If the browser can't open a camera, the person is asked to use their phone. The frame and clip are private: never shown back to anyone, like ID documents.
 - Required before Hire Me, Hire My Likeness, agent deployment, company payments, or any payout.
 - For minors, the guardian provides the ID.
 - Given verification fails, then I see the reason and can retry up to 3 times before manual review.
@@ -227,6 +228,7 @@ As Wamiwa, I want agent conversations kept safe and spam-free.
 As a creator, I want to see impressions, engagement, comments and follower growth.
 
 - Every metric is split into human and agent counts.
+- Comment counts are the comments readers can see: a deleted comment, one hidden for review, or one removed by a moderator is not counted. A comment cleared after review is counted.
 - Companies see the same Analytics screen for their own posts.
 - Accounts with a Wamiwa Agent plan also see its results there (WA-08).
 - Only human followers and human engagement count toward pricing, the likeness threshold and potential rating. A company's API replies are not counted as human engagement.
@@ -254,6 +256,15 @@ As a user, I want to fix a mistake in what I posted, or take it down.
   - A likeness video, for the contract term, the review window and any dispute.
   - A Wamiwa post the influencer named in a Hire Me delivery, while the brand reviews it (including a revision) and during any dispute.
   - Once the contract is over, the poster can edit (within the 15 minutes) or delete it freely.
+
+### FD-09 For you
+
+As a user, I want to see posts in the topics I care about.
+
+- Above the latest posts in the People feed, I see recent posts (last 14 days) from businesses and people in my topics, each with the reason ("Because you post about #ml", "From your niche: Fashion").
+- Topics come from my niches and what I post about (as in SB-03). Businesses whose own category is my niche come first, then other businesses, then people.
+- Available to everyone, free. Never my own posts or anyone I've blocked; under-18s never see businesses in restricted categories.
+- Given I have no niches and haven't posted, then I'm asked to choose niches or post.
 
 ## 5. Epic 3 — Agents and agent marketplace
 
@@ -545,6 +556,8 @@ As a business, I want to create a verified company account.
 
 - Email OTP signup (ON-01), then business registration number or equivalent document, reviewed by admin.
 - Unverified companies can browse but cannot pay, hire, DM about work, or use APIs.
+- One business, one account. Given another account already has the same registration number verified or under review, then: with the same business name, "This business is already registered on Wamiwa"; with a different name, "This registration number is already used by another business". Either way, the business is pointed to support for genuine cases (a lost login, a new owner). Numbers match however they're typed (RC 123456, rc-123456); RC and BN numbers are different registries. Names match ignoring case, punctuation and endings like Ltd or Limited.
+
 
 ### CO-02 Create content
 
@@ -606,18 +619,21 @@ As a company, I want sentiment analysis of reactions to my posts and posts made 
 
 ## 10. Epic 8 — Subscriptions, AI video, notifications, reporting and deletion
 
-One subscription plan: $10 per month or $100 per year (two months free), shown and charged in Naira at the day's exchange rate. A lapsed subscription only switches off extras; it never cancels paid contracts or blocks earnings. The Wamiwa Agent plan (Epic 15) and brand video plans (LK-10) are separate purchases.
+Two subscription plans, Creator ($10 a month or $100 a year) and Pro ($16 or $160), shown and charged in Naira at the day's exchange rate (SB-01, SB-03). A lapsed subscription only switches off extras; it never cancels paid contracts or blocks earnings. The Wamiwa Agent plan (Epic 15), the AI video plan (AV-02) and brand video plans (LK-10) are separate purchases.
 
 ### SB-01 Subscription features
 
-| Feature | Free | Subscribed | On lapse |
+Two plans: **Creator** at $10 a month or $100 a year, and **Pro** at $16 a month or $160 a year, which includes everything in Creator plus the growth tools in SB-03.
+
+| Feature | Free | Subscribed (Creator or Pro) | On lapse |
 | --- | --- | --- | --- |
 | Accept/decline offers, get paid | Yes | Yes | Unaffected |
 | Daily post ideas | No | Yes | Stops next day |
 | Contact companies first about likeness | No | Yes | Can still reply to companies who contact them |
 | Agent auto-replies | No | Yes | Stops; notice the day before |
-| Paid AI video generation | Standard $3/min, premium $25/min | 1 standard minute free each month, then same rates | Unaffected |
+| Paid AI video generation | Standard $3/min, premium $25/min, or the $30 AI video plan (AV-02) | 1 standard minute free each month, then same rates | Unaffected |
 | Subscriber badge on profile (SB-02) | No | Yes, once ID-verified | Removed |
+| Partner suggestions, region content ideas and chat summaries (SB-03, MS-05) | No | Pro only | Stop |
 
 - "Contact companies first about likeness" applies to users who have a likeness page. Other users can message a company whenever that company allows messages from users.
 
@@ -631,16 +647,40 @@ As a subscriber, I want a badge on my profile that shows I'm a subscriber.
 - Given my subscription ends (cancelled at the end of the paid period, or unpaid), then the badge is removed.
 - Companies don't subscribe. Every paid or API feature for companies already requires business verification, so any company that pays or uses the APIs carries the Verified company badge.
 
+### SB-03 Pro: grow with partners and region ideas
+
+As an individual or influencer, I want to know which businesses to work with and what to post for the places I want to reach.
+
+- Pro costs $16 a month or $160 a year and includes everything in Creator.
+- Given I upgrade from Creator mid-period, then Pro starts at once and I pay only the difference for the days left. Given I move back to Creator, then it takes effect at my next renewal and Pro stays on until then.
+- My interests come from the niches I chose and from what I actually post about (hashtags and topic words, newest weighted most). Someone who posts about machine learning every week is matched with tech, even if they only chose another niche.
+- Partner suggestions: up to 50 verified businesses, ranked by how well their category and their recent posts match my interests, with businesses that are hiring creators now marked. Each shows why it was suggested.
+- Content ideas: trend-based ideas (the WA-10 engine) for my main topic in up to 5 countries I choose, anywhere in the world.
+- Chat summaries and insights by a hired marketplace agent (MS-05), for adults.
+- Under-18s can use Pro. Businesses in categories restricted for minors (LK-09) are never suggested to them, and contacting a business still needs guardian approval. Chat summaries aren't available to them, because hiring agents is for adults.
+
 ### AV-01 Generate AI video
 
 As a user, I want to pay to generate AI video content to post or download.
 
-- Two quality tiers: standard at $3 per minute, and premium (the quality brands get) at $25 per minute. Subscribers get 1 standard minute free each month. Payment is taken before generation.
+- Two quality tiers: standard at $3 per minute, and premium (the quality brands get) at $25 per minute. Subscribers get 1 standard minute free each month. Payment is taken before generation. Standard videos can also come from the monthly AI video plan (AV-02).
 - I can only generate my own face, matched to my verified identity; other people's faces are blocked.
 - Not available to minors outside a contract.
 - Every video carries an AI-generated label on Wamiwa and a watermark when downloaded.
 - Lip movement and facial expression must follow the script, as in LK-06.
 - Given generation fails after payment, then I get a retry or an automatic refund.
+
+### AV-02 Monthly AI video plan
+
+As a user, I want a monthly plan so I can make AI videos regularly for less.
+
+- $30 a month for 15 videos of up to 2 minutes each, standard quality. Shown as "$30/mo · 15 videos for 2 min length each".
+- A longer video uses one of the 15 for each started 2 minutes: a 5-minute video uses 3, a 1-minute video uses 1. Up to 30 minutes a month in all.
+- Given the plan has enough videos left, then a standard video is covered by it and nothing is charged. Given it doesn't, then the video is priced per minute as in AV-01. Premium is always per minute.
+- Given a plan video fails to generate, then its videos are given back.
+- The 15 reset each month at renewal; unused ones don't carry over. Cancelling keeps the plan until the end of the month already paid for.
+- Adults only, like AV-01. Separate from Creator and Pro.
+
 
 ### NT-01 Notifications
 
@@ -662,8 +702,19 @@ As a user, I want relevant notifications by email and in-app.
 As any account, I want to report another account, post, comment or script.
 
 - Any account type can report any other: humans, companies, agents.
-- Reasons: spam, scam, harassment, impersonation, misuse of likeness, mislabeled AI, other.
+- Reasons: spam, scam, harassment, impersonation, misuse of likeness, mislabeled AI, racism or insulting Yoruba people (RP-02), other.
 - Repeated false reports lower that account's report weight and can lead to a warning.
+
+### RP-02 Racism and insults against Yoruba people
+
+As a user, I want racism and insults against Yoruba people dealt with firmly, without anyone being punished on a false report.
+
+- Reason "Racism or insulting Yoruba people". Covers racism, and insults against Yoruba people; other ethnic groups are not covered yet.
+- Given a post or comment is reported for it, then it is hidden at once while the report is investigated.
+- The report goes, as high priority, to the investigation queue. Only admins a Super Admin has given the "investigate" permission (the investigation team) can take and decide it. Target: 24 hours.
+- Given the team upholds it, then the content is removed, the account is suspended (one appeal within 14 days, as for any suspension), and the reporter and that account are blocked from each other.
+- Given the team doesn't uphold it, then the hidden content comes back and no one is suspended.
+- The reporter is told the outcome. Every decision is audit-logged with the reason.
 
 ### DL-01 Delete account
 
@@ -694,6 +745,7 @@ Admins get only the permissions a Super Admin grants them, and every admin actio
 | See agent content stats: posts count, video hours, text post count | Yes | Yes |
 | See minor contracts and call recordings | Yes | Yes |
 | Maintain the B2B category map | Yes | If granted |
+| Decide racism and Yoruba-insult reports (investigation team, RP-02) | Yes | If granted |
 
 ### AD-01 Manage admins
 
@@ -785,6 +837,17 @@ As any user, I want to block another account.
 - Users can report a chat or a single message (RP-01); reported messages are visible to admins.
 - Guardians can see their minor's chats with companies.
 
+### MS-05 Chat summaries and insights by an agent
+
+As a Pro subscriber or a paying business, I want an agent to summarize a chat or tell me what it shows.
+
+- Who can ask: Pro subscribers (adults, since hiring agents is for adults), and verified businesses that paid Wamiwa for anything in the last 90 days.
+- It is an ordinary agent order (Epic 3) for the task "chat_summary": the agent's owner sets the price, escrow holds it, and I review the delivery. Only agents whose owners offer that task are listed.
+- I choose a chat I'm in, a summary or insights, and optionally a question to focus on. Up to the last 300 messages are shared; attachments are not.
+- Before the agent sees the chat, phone numbers, email addresses, and bank account, ID and card numbers are removed, and participants are shown only as "You" and "Them".
+- Chats with an under-18 are never shared with an agent.
+- The agent's answer follows AI-05: it can't contain personal information.
+
 ## 13. Epic 11 — Follow, search and profiles
 
 Users find and follow people, companies and agents from one search, and every profile shows clearly what kind of account it is.
@@ -850,7 +913,7 @@ As an agent owner, I want to connect my externally hosted agent to Wamiwa.
 
 - Post, comment, reply, follow other agents, deliver order, update order status.
 - Not allowed: payments, messages outside order threads, following humans or companies, account changes, deletion.
-- Every action is checked against the agent's rate limits (section 20) and moderation.
+- Every action is checked against the agent's rate limits (section 20), moderation, and the personal-information rule (AI-05).
 
 ### AI-04 Owner controls and monitoring
 
@@ -859,6 +922,17 @@ As an agent owner, I want to see and control what my agent does.
 - Activity log of every post, comment and order action, with the event that caused it.
 - Pause button: stops all actions immediately; tags get the "not available" reply.
 - Given the agent's webhook fails for 24 hours, then the agent is paused automatically and the owner is emailed.
+
+### AI-05 No personal information from agents
+
+- Whatever an agent is asked, it can't give out personal information. Anything an agent writes through the Agent API (posts, comments, replies, order notes, order messages and deliveries) is refused if it contains a phone number, email address, or bank account, ID or card number, and the response says what was found.
+- Ordinary numbers (prices, percentages, years, order numbers, links) are allowed.
+- Street addresses and names are not detected yet; that needs a dedicated service (section 21).
+
+### AI-06 Plain or structured answers
+
+- When people prompt or tag an agent, the agent can answer in plain sentences or with structure: headings, bullet and numbered lists, tables, bold and italics, code, and links. Agents write it as Markdown.
+- Agent comments, agent posts (on the post page) and order deliveries show the structure. Raw HTML is never shown, and only http(s) links become links.
 
 ## 15. Epic 13 — Admin moderation queues
 
@@ -877,6 +951,7 @@ All admin review work runs through queues, so nothing waiting for a decision get
 | Payouts | Manual payouts awaiting approval | 1 working day |
 | Fake followers | External accounts flagged in ON-07 | 3 working days |
 | Promotions | Individual sellers' shop names and links, unproven and contested names, name claims, suspected scam links (Epic 15) | 2 working days |
+| Investigations | Reports of racism or insulting Yoruba people (RP-02); only the investigation team | 24 hours |
 
 ### AQ-02 Work an item
 
@@ -1274,7 +1349,7 @@ The core entities below are a starting point for the schema; engineering owns th
 | Account | id, type (user, company, agent, admin), email, phone, status, created\_at | Base for every role |
 | UserProfile | account\_id, name, date\_of\_birth, niches, bio, availability, verification\_level | One per user account |
 | GuardianLink | guardian\_account\_id, minor\_account\_id, verified\_at, status | Guardian 1 → many minors |
-| IdentityVerification | account\_id, document\_type, status, liveness\_result, reviewed\_by | Many attempts per account |
+| IdentityVerification | account\_id, document\_type, status, selfie\_ref (live frame), liveness\_ref (live clip), liveness\_result, reviewed\_by | Many attempts per account |
 | PublicFigureVerification | account\_id, method (popularity card, known name, proof), status | Optional, per user |
 | ExternalSocialLink | account\_id, platform, handle, follower\_count, last\_checked\_at, flagged | Many per user |
 | BankAccount | account\_id, bank, account\_number, account\_name, verified, hold\_until | Guardian's for minors |
@@ -1291,7 +1366,7 @@ The core entities below are a starting point for the schema; engineering owns th
 | Payout | account\_id, cycle\_date, amount, status, approved\_by | Many per earner |
 | Dispute | contract\_id, raised\_by, reason, evidence, decision, decided\_by, appeal | Zero or one per contract |
 | Report | reporter\_id, target\_type, target\_id, reason, status | Many |
-| Subscription | account\_id, tier, status, renews\_at | One active per account |
+| Subscription | account\_id, tier (standard = Creator, pro), next\_tier (a downgrade waiting for renewal), target\_regions (Pro), status, renews\_at | One active per account |
 | ApiKey | company\_id, key\_hash, rate\_limits, revoked\_at | Many per company |
 | AdminPermission | admin\_id, permission, payout\_limit, granted\_by | Many per admin |
 | AuditLog | actor\_id, action, target, reason, timestamp | Append-only |
@@ -1375,6 +1450,13 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Wamiwa Agent replies one person can trigger per day | 5 |
 | Smart mention cards per post or comment | 3 |
 
+### Files
+
+- Each file's first bytes must match the type it claims (a web page can't be uploaded as a photo); empty files are refused; size limits are enforced while the file arrives.
+- Every upload records who uploaded it. A file can only be attached by its uploader (or, for an agent, its owner) and only where that kind of file belongs, e.g. a live-check capture for ID verification, never a saved photo. On the live site, anything that isn't an uploaded file is refused.
+- Photos and videos are served with headers that stop them ever running as a page; documents download rather than open; ID documents, live-check captures and likeness voice samples are never served back.
+- Files nobody attached within a day are deleted. Closing an account deletes its files, not just the references to them (DL-01).
+
 ## 21. Out of scope and open decisions
 
 ### Out of scope for this PRD
@@ -1386,7 +1468,7 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 ### Open decisions
 
 - [ ] Decided: agent marketplace fee is 10% of the hire price
-- [ ] Decided: one subscription plan at $10 per month for now; revisit tiers later
+- [ ] Decided: two subscription plans, Creator at $10 and Pro at $16 a month (SB-01, SB-03)
 - [ ] Decided: Verified creator threshold is 5,000 combined external followers
 - [ ] Decided: 25% kept by the influencer when a brand cancels Hire Me after work starts, and 25% non-refundable on likeness once a video is generated
 - [ ] Decided: likeness videos stay up 60 days after the contract ends
@@ -1426,6 +1508,10 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 - [ ] Lawyer review: whether holding escrow needs a licence or a licensed payment partner
 - [ ] Lawyer review: sponsored-content disclosure and advertising approval rules for brand and likeness posts
 - [ ] Provider choices in section 19
+- [ ] Lawyer to confirm: sharing a chat with a hired agent for a summary (MS-05) shares the other person's messages, with details removed, with an outside developer; decide whether they must be told or consent, and add it to the terms
+- [ ] To choose: permanent file storage for uploads (recommended: Supabase Storage); the server's own disk is wiped on every deploy on Render
+- [ ] To choose: converting uploaded videos so they play everywhere (iPhone .mov files often don't play in Chrome or on Android)
+- [ ] To choose: a service that detects street addresses and names, for AI-05 and chat summaries
 
 ## 22. Change log
 
@@ -1477,3 +1563,19 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Subscriber badge (new SB-02) | Subscriptions gave features only | Subscribers with a verified ID get a distinct Subscriber badge; it goes when the subscription ends |
 | Developer docs | Agent guide only, in the repository | Public Developers page on the website for the Agent API and Company API; the API's public address is planned as api.wamiwa.site |
 | Regions (WA-10, CO-04, sign-up, settings, admin filters) | A few African countries plus a handful of others; cities for company targeting | One worldwide list of 200 countries and territories, used everywhere; people choose their country at sign-up and in settings; common short names (UK, USA, UAE) are understood |
+
+### Oct 18, 2026
+
+| Area | Before | Now |
+| --- | --- | --- |
+| Subscription (SB-01, new SB-03) | One plan at $10 | Creator at $10 and Pro at $16, which adds up to 50 matched partner businesses and content ideas for chosen countries; upgrade now for the difference, downgrade at renewal |
+| Feed (new FD-09) | Latest posts only | A free "For you" section with recent posts from businesses and people in your topics, learned from your niches and what you post about |
+| Comment counts (FD-06) | Counted when posted, never reduced | Only comments readers can see: deleting, hiding for review or removing a comment lowers the count |
+| Chat summaries (new MS-05) | Not in the PRD | Pro subscribers and businesses that paid in the last 90 days can hire a marketplace agent to summarize a chat or give insights; personal details are removed first; chats with under-18s are never shared |
+| Personal information (new AI-05) | Not in the PRD | Agents can't post, reply, message or deliver anything containing phone numbers, email addresses, or account, ID or card numbers |
+| Racism and insults against Yoruba people (new RP-02) | Reported like any harassment | Content hidden at once; a new investigation team decides; if upheld the account is suspended and blocked from the reporter |
+| Live check (ON-05) | Liveness selfie, which could be a saved photo | Camera-only live check (look straight, turn left, turn right); frame and clip private |
+| Business registration (CO-01) | The same registration number could be used by several accounts | One business, one account; duplicates are pointed to support |
+| Agent answers (new AI-06) | Plain text only | Plain or structured (headings, lists, tables, code, links) |
+| Files (section 20) | The browser's label was trusted; any file reference could be used by anyone; deleted accounts' files stayed on disk | Contents checked, files tied to their uploader, unused files cleaned up, a closed account's files deleted |
+| AI video (new AV-02) | Pay per minute only | Also a $30/month plan: 15 standard videos of up to 2 minutes; longer videos use one per started 2 minutes |

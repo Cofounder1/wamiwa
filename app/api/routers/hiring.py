@@ -182,6 +182,8 @@ async def rate_contract(contract_id: str, body: RatingIn, p: Active, svc: Servic
 # --- Hire Me (HM-01 to HM-05) -------------------------------------------------------------------------
 @router.put("/hire-me/page")
 async def save_hire_me_page(body: HireMePageIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, body.photos, {"image"})
+    await svc.uploads.claim(p.account, body.videos, {"video"})
     return ok(await svc.hire_me.save_page(p.account, body.starting_price_cents, body.photos, body.videos))
 
 
@@ -266,11 +268,14 @@ async def likeness_assets(p: Active, svc: Services, minor_id: str | None = None)
 
 @router.post("/likeness/assets/photos", status_code=201)
 async def add_likeness_photo(body: PhotoIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, [body.file_ref], {"image"})
+    await svc.uploads.claim(p.account, [body.liveness_selfie_ref], {"liveness", "image"})
     return ok(await svc.likeness_pages.add_photo(p.account, body.minor_id, body.file_ref, body.liveness_selfie_ref))
 
 
 @router.post("/likeness/assets/voice", status_code=201)
 async def add_voice_sample(body: VoiceIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, [body.file_ref], {"likeness_voice"})
     return ok(await svc.likeness_pages.add_voice(p.account, body.minor_id, body.file_ref, body.duration_seconds,
                                                  body.recorded_in_app, body.voice_consent))
 
@@ -395,6 +400,7 @@ async def view_dispute(dispute_id: str, p: Active, svc: Services):
 
 @router.post("/disputes/{dispute_id}/evidence")
 async def add_evidence(dispute_id: str, body: EvidenceIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, body.attachments, {"image", "video", "document", "voice_note"})
     return ok(await svc.disputes.add_evidence(p.account, dispute_id, body.statement, body.attachments))
 
 

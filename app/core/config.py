@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     upload_max_bytes: dict[str, int] = Field(default_factory=lambda: {
         "image": 10 * 1024 * 1024, "video": 200 * 1024 * 1024, "voice_note": 25 * 1024 * 1024,
-        "document": 25 * 1024 * 1024, "likeness_voice": 25 * 1024 * 1024, "id_document": 10 * 1024 * 1024})  # run the in-process scheduler; disable on all but one worker
+        "document": 25 * 1024 * 1024, "likeness_voice": 25 * 1024 * 1024, "id_document": 10 * 1024 * 1024,
+        "liveness": 20 * 1024 * 1024})  # run the in-process scheduler; disable on all but one worker
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -175,6 +176,9 @@ class Settings(BaseSettings):
     ai_video_standard_cents_per_minute: int = 3_00
     ai_video_premium_cents_per_minute: int = 25_00
     subscriber_free_standard_seconds: int = 60
+    ai_video_plan_cents: int = 30_00  # AV-02: $30 a month
+    ai_video_plan_videos: int = 15  # videos a month
+    ai_video_plan_seconds_per_video: int = 120  # each covers up to 2 minutes
     video_slow_job_seconds: int = 10 * 60
     video_sync_retries: int = 1  # automatic re-renders when lips or expression do not follow the script
 
@@ -196,6 +200,9 @@ class Settings(BaseSettings):
     # --- subscriptions (Epic 8) ---
     subscription_monthly_cents: int = 10_00
     subscription_yearly_cents: int = 100_00
+    subscription_pro_monthly_cents: int = 16_00  # SB-03 Pro: everything in Creator, plus growth tools
+    subscription_pro_yearly_cents: int = 160_00
+    growth_partner_suggestions: int = 50
 
     # --- payments / payouts ---
     local_currency: str = "NGN"

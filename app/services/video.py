@@ -10,7 +10,7 @@ from app.core.enums import (
 from app.core.exceptions import Conflict, Forbidden, NotFound, PaymentRequired, Unprocessable
 from app.infra.providers.base import VideoRequest
 from app.models import (
-    Account, BrandVideoPlan, Contract, GeneratedVideo, LikenessConsent, Subscription, VideoProduction,
+    Account, BrandVideoPlan, Contract, CreatorVideoPlan, GeneratedVideo, LikenessConsent, Subscription, VideoProduction,
 )
 from app.services.base import BaseService
 
@@ -308,7 +308,12 @@ class VideoGenerationService(BaseService):
             return await self._refresh(video)
         video.status = VideoStatus.FAILED
         if video.kind == VideoKind.PERSONAL:
-            await self.svc.payment.refund(video.payment_id)
+            if video.payment_id:
+                await self.svc.payment.refund(video.payment_id)
+            if video.plan_videos_used:  # AV-02: the plan's videos come back
+                plan = await self.repo(CreatorVideoPlan).first(CreatorVideoPlan.account_id == video.owner_account_id)
+                if plan and plan.active:
+                    plan.videos_left += video.plan_videos_used
         else:
             production = await self.repo(VideoProduction).first(VideoProduction.contract_id == video.contract_id)
             if video.payment_id:
@@ -406,11 +411,86 @@ class VideoGenerationService(BaseService):
     def _rate(self, tier: VideoTier) -> int:
         return self.s.ai_video_premium_cents_per_minute if tier == VideoTier.PREMIUM else self.s.ai_video_standard_cents_per_minute
 
+    def plan_videos_for(self, seconds: int) -> int:
+        """AV-02: each started 2 minutes is one of the plan's videos (a 5-minute video uses 3)."""
+        return math.ceil(seconds / self.s.ai_video_plan_seconds_per_video)
+
     async def personal_quote(self, account: Account, seconds: int, tier: VideoTier) -> dict[str, Any]:
+        """Standard quality comes from the monthly plan when it has enough videos left; otherwise the subscriber's
+        free minute, then pay per minute. Premium is always pay per minute."""
+        base = {"tier": tier, "seconds": seconds, "rate_cents_per_minute": self._rate(tier), "plan_videos_applied": 0,
+                "free_seconds_applied": 0}
+        if tier == VideoTier.STANDARD:
+            plan = await self._active_plan(account.id)
+            needed = self.plan_videos_for(seconds)
+            if plan and plan.videos_left >= needed:
+                return {**base, "plan_videos_applied": needed, "plan_videos_left_after": plan.videos_left - needed,
+                        "price_cents": 0}
         free = await self._free_seconds_available(account) if tier == VideoTier.STANDARD else 0
         billable = max(0, seconds - free)
-        return {"tier": tier, "seconds": seconds, "free_seconds_applied": seconds - billable,
-                "price_cents": math.ceil(self._rate(tier) * billable / 60), "rate_cents_per_minute": self._rate(tier)}
+        return {**base, "free_seconds_applied": seconds - billable,
+                "price_cents": math.ceil(self._rate(tier) * billable / 60)}
+
+    # --- AV-02 monthly AI video plan ---------------------------------------------------------------
+    async def _active_plan(self, account_id: str) -> CreatorVideoPlan | None:
+        plan = await self.repo(CreatorVideoPlan).first(CreatorVideoPlan.account_id == account_id)
+        return plan if plan and plan.active and plan.renews_at > self.now() else None
+
+    def _present_plan(self, plan: CreatorVideoPlan | None) -> dict[str, Any]:
+        terms = {"price_cents": self.s.ai_video_plan_cents, "videos": self.s.ai_video_plan_videos,
+                 "minutes_per_video": self.s.ai_video_plan_seconds_per_video // 60, "quality": "standard"}
+        if plan is None or not plan.active:
+            return {"active": False, "terms": terms}
+        return {"active": True, "terms": terms, "videos_left": plan.videos_left,
+                "renews_at": plan.renews_at.isoformat(), "cancel_at_period_end": plan.cancel_at_period_end}
+
+    async def personal_plan(self, account: Account) -> dict[str, Any]:
+        return self._present_plan(await self._active_plan(account.id))
+
+    async def subscribe_personal_plan(self, account: Account, payment_method: str) -> dict[str, Any]:
+        await self.svc.access.require_adult(account, "buy an AI video plan")  # AV-01: not for minors
+        plan = await self.repo(CreatorVideoPlan).first(CreatorVideoPlan.account_id == account.id)
+        if plan and plan.active and plan.renews_at > self.now():
+            if plan.cancel_at_period_end:  # changed their mind: keep it renewing
+                plan.cancel_at_period_end = False
+                return self._present_plan(plan)
+            raise Conflict("You already have the AI video plan", code="already_subscribed")
+        await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO_PLAN, self.s.ai_video_plan_cents, payment_method)
+        if plan is None:
+            plan = await self.repo(CreatorVideoPlan).add(CreatorVideoPlan(
+                account_id=account.id, renews_at=self.now(), payment_method=payment_method))
+        plan.active, plan.cancel_at_period_end, plan.payment_method = True, False, payment_method
+        plan.videos_left = self.s.ai_video_plan_videos
+        plan.renews_at = self.now() + timedelta(days=PLAN_PERIOD_DAYS)
+        return self._present_plan(plan)
+
+    async def cancel_personal_plan(self, account: Account) -> dict[str, Any]:
+        plan = await self._active_plan(account.id)
+        if plan is None:
+            raise NotFound("You have no AI video plan")
+        plan.cancel_at_period_end = True  # the month already paid for stays usable
+        return self._present_plan(plan)
+
+    async def renew_personal_plans(self) -> int:
+        """Job: monthly renewal. The month's videos reset to 15; unused ones don't carry over."""
+        due = await self.repo(CreatorVideoPlan).list(CreatorVideoPlan.active.is_(True), CreatorVideoPlan.renews_at <= self.now())
+        for plan in due:
+            account = await self.repo(Account).require(plan.account_id)
+            if plan.cancel_at_period_end or not account.is_active:
+                plan.active, plan.videos_left = False, 0
+                continue
+            try:
+                await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO_PLAN, self.s.ai_video_plan_cents,
+                                              plan.payment_method)
+            except PaymentRequired:
+                plan.active, plan.videos_left = False, 0
+                await self.svc.notifications.notify(account.id, NotificationType.PAYMENT,
+                                                    "Your AI video plan was not renewed",
+                                                    "The payment failed. Subscribe again to keep making videos on the plan.")
+                continue
+            plan.videos_left = self.s.ai_video_plan_videos
+            plan.renews_at = plan.renews_at + timedelta(days=PLAN_PERIOD_DAYS)
+        return len(due)
 
     async def _subscription(self, account_id: str) -> Subscription | None:
         subscription = await self.repo(Subscription).first(Subscription.account_id == account_id)
@@ -444,6 +524,9 @@ class VideoGenerationService(BaseService):
                 raise PaymentRequired("Payment is taken before generation", code="payment_required",
                                       price_cents=quote["price_cents"])
             payment = await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO, quote["price_cents"], payment_method)
+        if quote["plan_videos_applied"]:
+            plan = await self._active_plan(account.id)
+            plan.videos_left -= quote["plan_videos_applied"]
         if quote["free_seconds_applied"]:
             subscription = await self._subscription(account.id)
             month = self.clock.today().strftime("%Y-%m")
@@ -452,12 +535,14 @@ class VideoGenerationService(BaseService):
             subscription.free_seconds_used += quote["free_seconds_applied"]
         video = await self.repo(GeneratedVideo).add(GeneratedVideo(
             owner_account_id=account.id, kind=VideoKind.PERSONAL, tier=tier, script_text=script.strip(),
-            seconds=seconds, payment_id=payment.id if payment else None))
+            seconds=seconds, payment_id=payment.id if payment else None,
+            plan_videos_used=quote["plan_videos_applied"]))
         video.provider_job_id = await self.providers.video.submit(VideoRequest(
             reference=video.id, script=video.script_text, face_ref=profile.face_ref, voice_ref=None,
             quality=tier, seconds=seconds))
         await self._refresh(video)
-        return {**self.present(video), "charged_cents": quote["price_cents"]}
+        return {**self.present(video), "charged_cents": quote["price_cents"],
+                "plan_videos_used": quote["plan_videos_applied"]}
 
     async def download(self, account: Account, video_id: str) -> dict[str, Any]:
         video = await self.repo(GeneratedVideo).require(video_id, "Video not found")

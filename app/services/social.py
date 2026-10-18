@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy import String, cast, or_, select
 
 from app.core.enums import AccountStatus, AccountType, ModerationStatus, NotificationType
-from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
+from app.core.exceptions import Forbidden, NotFound, Unprocessable
 from app.core.utils import Cursor, Page
 from app.models import (
     Account, AgentProfile, Block, CompanyProfile, Follow, HireMePage, LikenessPage, Post, UserProfile,

@@ -8,7 +8,7 @@ from app.core.enums import (
 )
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
 from app.models import (
-    Account, AgentProfile, Comment, Contract, Conversation, ConversationParticipant, LikenessAsset,
+    Account, AgentProfile, Comment, Contract, ConversationParticipant, LikenessAsset,
     Message, Post, QueueItem, Report, UserProfile,
 )
 from app.services.base import BaseService
@@ -64,6 +64,14 @@ class ReportService(BaseService):
             reporter_id=reporter.id, target_type=target_type, target_id=target_id,
             target_account_id=target_account_id, reason=reason, details=details.strip(),
             weight=reporter.report_weight))
+        if reason == ReportReason.RACISM_OR_ETHNIC_INSULT:
+            # RP-02: the content is hidden at once and the investigation team decides; the account is
+            # suspended only if they uphold the report.
+            await self._hide_pending_investigation(target_type, target_id)
+            await self.svc.queues.enqueue(
+                Queue.INVESTIGATIONS, "report", report.id, subject_account_id=target_account_id, severity="high",
+                summary=f"Racism or insulting Yoruba people: {details[:160]}")
+            return {"id": report.id, "status": report.status, "reason": report.reason}
         # Reports from accounts with a record of false reports carry less weight.
         severity = "high" if reason in HIGH_SEVERITY else "normal"
         if reporter.report_weight < 0.5 or (reason == ReportReason.OTHER and severity != "high"):
@@ -114,6 +122,49 @@ class ReportService(BaseService):
             reporter.id, NotificationType.LEGAL, "Your report was reviewed",
             "We took action." if approved else "We did not find a violation.", {"report_id": report.id})
 
+    async def _hide_pending_investigation(self, target_type: ReportTarget, target_id: str) -> None:
+        if target_type == ReportTarget.POST:
+            post = await self.repo(Post).get(target_id)
+            if post and post.moderation_status == ModerationStatus.VISIBLE:
+                post.moderation_status = ModerationStatus.FLAGGED
+                await self.cache.invalidate_prefix("feed:")
+        elif target_type == ReportTarget.COMMENT:
+            comment = await self.repo(Comment).get(target_id)
+            if comment and comment.moderation_status == ModerationStatus.VISIBLE:
+                comment.moderation_status = ModerationStatus.FLAGGED
+                await self.svc.comments.recount(await self.repo(Post).require(comment.post_id))
+
+    async def apply_investigation(self, item: QueueItem, approved: bool, admin: Account, reason: str,
+                                  payload: dict) -> None:
+        """RP-02. Upheld: the content is removed, the account suspended, and the two accounts blocked from each
+        other. Rejected: hidden content comes back."""
+        report = await self.repo(Report).require(item.target_id)
+        report.status = ReportStatus.UPHELD if approved else ReportStatus.DISMISSED
+        content = report.target_type in (ReportTarget.POST, ReportTarget.COMMENT)
+        if approved:
+            if content:
+                await self._set_visibility(report.target_type, report.target_id, visible=False)
+            target = await self.repo(Account).get(report.target_account_id) if report.target_account_id else None
+            if target and not target.is_admin and target.status == AccountStatus.ACTIVE:
+                why = f"Racism or insulting Yoruba people, confirmed by the investigation team. {reason}"
+                await self.svc.audit.log(admin.id, "account.suspend", "account", target.id, why, investigation=report.id)
+                await self.svc.trust._apply_suspension(target, why)
+                await self.svc.notifications.notify(
+                    target.id, NotificationType.LEGAL, "Your account has been suspended",
+                    f"{why} You can appeal once within {self.s.suspension_appeal_days} days.")
+            if target:
+                reporter = await self.repo(Account).require(report.reporter_id)
+                await self.svc.blocks.block(reporter, target.id)
+        elif content:
+            model = Post if report.target_type == ReportTarget.POST else Comment
+            target_content = await self.repo(model).get(report.target_id)
+            if target_content and target_content.moderation_status == ModerationStatus.FLAGGED:
+                await self._set_visibility(report.target_type, report.target_id, visible=True)
+        await self.svc.notifications.notify(
+            report.reporter_id, NotificationType.LEGAL, "Your report was reviewed",
+            "The investigation team confirmed it and took action." if approved else
+            "The investigation team did not find racism or insults against Yoruba people.", {"report_id": report.id})
+
     async def _set_visibility(self, target_type: str, target_id: str, visible: bool) -> None:
         model = Post if target_type == "post" else Comment
         target = await self.repo(model).get(target_id)
@@ -121,6 +172,8 @@ class ReportService(BaseService):
             target.moderation_status = ModerationStatus.VISIBLE if visible else ModerationStatus.REMOVED
             if model is Post:
                 await self.cache.invalidate_prefix("feed:")
+            else:  # a removed comment stops counting; one cleared after review starts counting
+                await self.svc.comments.recount(await self.repo(Post).require(target.post_id))
 
     async def _enforce(self, report: Report, admin: Account, reason: str, payload: dict) -> None:
         if report.reason == ReportReason.MISUSE_OF_LIKENESS and report.target_type == ReportTarget.SCRIPT:
@@ -319,6 +372,7 @@ class DeletionService(BaseService):
             asset.deleted_at, asset.file_ref = asset.deleted_at or self.now(), "deleted"
         for post in await self.repo(Post).list(Post.author_account_id == account.id):
             post.moderation_status, post.text, post.media_ref = ModerationStatus.REMOVED, "", None
+        await self.svc.uploads.delete_for_account(account.id)  # the files themselves, not just the references
         for agent in await self.repo(AgentProfile).list(AgentProfile.owner_account_id == account.id):
             agent_account = await self.repo(Account).get(agent.account_id)
             if agent_account:

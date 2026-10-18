@@ -87,6 +87,15 @@ class AccessPolicy(BaseService):
         profile = profile or await self.profile(account_id)
         return bool(profile and profile.id_verified and await self.is_subscribed(account_id))
 
+    async def is_pro(self, account_id: str) -> bool:
+        """SB-03: subscribed now, on the Pro tier."""
+        subscription = await self.repo(Subscription).first(Subscription.account_id == account_id)
+        return bool(subscription and subscription.tier == "pro" and await self.is_subscribed(account_id))
+
+    async def require_pro(self, account: Account, feature: str) -> None:
+        if not await self.is_pro(account.id):
+            raise Forbidden(f"{feature} come with Pro", code="pro_required", hint="POST /subscriptions with tier pro")
+
     async def require_subscription(self, account: Account, feature: str) -> None:
         if not await self.is_subscribed(account.id):
             raise Forbidden(f"{feature} is a subscriber feature", code="subscription_required",
@@ -164,11 +173,10 @@ class AccountService(BaseService):
         for field, column in (("photo", "photo_ref"), ("bio", "bio"), ("location", "location"), ("links", "links")):
             if changes.get(field) is not None:
                 setattr(profile, column, changes[field])
+        if "primary_niche" in changes or "secondary_niches" in changes:
+            await self.cache.delete(f"interests:{account.id}")
         if changes.get("region") is not None:
-            account.region = core_regions.normalize(changes["region"])
-            if account.region is None and changes["region"].strip():
-                raise Unprocessable(f"Unknown region: {changes['region']}", code="unknown_region",
-                                    hint="GET /regions lists them")
+            account.region = core_regions.require(changes["region"])
         await self.svc.profiles.invalidate(account)
         return await self.me(account)
 

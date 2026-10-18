@@ -17,6 +17,15 @@ class PayIn(BaseModel):
 
 class SubscribeIn(PayIn):
     period: BillingPeriod = BillingPeriod.MONTHLY
+    tier: Literal["standard", "pro"] = "standard"
+
+
+class TierIn(PayIn):
+    tier: Literal["standard", "pro"]
+
+
+class RegionsIn(BaseModel):
+    regions: list[str] = Field(max_length=5, description="Countries to get content ideas for (GET /regions)")
 
 
 class PlanIn(PayIn):
@@ -117,7 +126,30 @@ async def subscription_status(p: Active, svc: Services):
 
 @router.post("/subscriptions", status_code=201)
 async def subscribe(body: SubscribeIn, p: Active, svc: Services):
-    return ok(await svc.subscriptions.subscribe(p.account, body.period, body.payment_method))
+    return ok(await svc.subscriptions.subscribe(p.account, body.period, body.payment_method, body.tier))
+
+
+@router.patch("/subscriptions")
+async def change_subscription_tier(body: TierIn, p: Active, svc: Services):
+    """Upgrade to Pro now (pay the difference for the days left), or move back to Creator at renewal."""
+    return ok(await svc.subscriptions.change_tier(p.account, body.tier, body.payment_method))
+
+
+# --- Pro growth tools (SB-03) ----------------------------------------------------------------------------------
+@router.get("/growth/partners")
+async def growth_partners(p: Active, svc: Services):
+    """Up to 50 verified businesses that fit what you post about, with the reasons."""
+    return ok(await svc.growth.partners(p.account))
+
+
+@router.put("/growth/regions")
+async def growth_regions(body: RegionsIn, p: Active, svc: Services):
+    return ok(await svc.growth.set_regions(p.account, body.regions))
+
+
+@router.get("/growth/ideas")
+async def growth_ideas(p: Active, svc: Services, region: str | None = Query(default=None, max_length=64)):
+    return ok(await svc.growth.ideas(p.account, region))
 
 
 @router.delete("/subscriptions")
@@ -129,6 +161,23 @@ async def cancel_subscription(p: Active, svc: Services):
 async def ai_video_quote(p: Active, svc: Services, seconds: int = Query(ge=5, le=600),
                          tier: VideoTier = VideoTier.STANDARD):
     return ok(await svc.videos.personal_quote(p.account, seconds, tier))
+
+
+@router.get("/ai-videos/plan")
+async def ai_video_plan(p: Active, svc: Services):
+    """AV-02: $30 a month for 15 standard videos of up to 2 minutes (longer ones use one per started 2 minutes)."""
+    return ok(await svc.videos.personal_plan(p.account))
+
+
+@router.post("/ai-videos/plan", status_code=201)
+async def subscribe_ai_video_plan(body: PayIn, p: Active, svc: Services):
+    return ok(await svc.videos.subscribe_personal_plan(p.account, body.payment_method))
+
+
+@router.delete("/ai-videos/plan")
+async def cancel_ai_video_plan(p: Active, svc: Services):
+    """Stops at the end of the month already paid for."""
+    return ok(await svc.videos.cancel_personal_plan(p.account))
 
 
 @router.get("/ai-videos")
@@ -175,6 +224,7 @@ async def request_arcon_filing(body: ArconIn, p: Active, svc: Services):
 # --- companies (CO-01, CO-03, CO-04) and API keys ----------------------------------------------------------------
 @router.post("/companies/verification")
 async def submit_company_verification(body: CompanyVerificationIn, p: Active, svc: Services):
+    await svc.uploads.claim(p.account, [body.document_ref], {"document", "id_document"})
     return ok(await svc.companies.submit_verification(p.account, body.registration_no, body.document_ref, body.category))
 
 

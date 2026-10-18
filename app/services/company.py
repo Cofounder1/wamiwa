@@ -1,4 +1,5 @@
 """Epic 7: company verification and settings, B2B discovery, API keys and the company API."""
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -22,6 +23,27 @@ def normalize_category(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
 
 
+COMPANY_SUFFIXES = {"ltd", "limited", "plc", "inc", "llc", "co", "company", "nig", "nigeria"}
+
+
+def registration_key(value: str) -> tuple[str, str]:
+    """("RC", "123456") for "RC 123456", "rc-123456" or "RC123456"; ("", "123456") when no prefix is given.
+    RC (companies) and BN (business names) are different registries, so the prefix is kept."""
+    compact = re.sub(r"[^A-Za-z0-9]", "", value or "").upper()
+    match = re.fullmatch(r"([A-Z]*)(\d+)", compact)
+    return (match.group(1), match.group(2)) if match else ("", compact)
+
+
+def same_registration(a: str, b: str) -> bool:
+    (pa, da), (pb, db) = registration_key(a), registration_key(b)
+    return bool(da) and da == db and (pa == pb or not pa or not pb)
+
+
+def name_key(value: str | None) -> str:
+    words = re.findall(r"[a-z0-9]+", (value or "").lower())
+    return " ".join(w for w in words if w not in COMPANY_SUFFIXES)
+
+
 class CompanyService(BaseService):
     async def _company(self, account: Account) -> CompanyProfile:
         company = await self.svc.access.company(account.id) if account.is_company else None
@@ -37,6 +59,7 @@ class CompanyService(BaseService):
             raise Conflict("Your business is already verified", code="already_verified")
         if company.verification_status == VerificationStatus.PENDING:
             raise Conflict("Your documents are already under review", code="review_pending")
+        await self._check_not_registered(account, company, registration_no)
         company.registration_no, company.document_ref = registration_no.strip(), document_ref
         if category:
             company.category = normalize_category(category)
@@ -44,6 +67,27 @@ class CompanyService(BaseService):
         await self.svc.queues.enqueue(Queue.COMPANY, "company", account.id, subject_account_id=account.id,
                                       summary=f"{company.business_name} ({registration_no})")
         return {"verification_status": company.verification_status, "verified": False}
+
+    async def _check_not_registered(self, account: Account, company: CompanyProfile, registration_no: str) -> None:
+        """CO-01: one business, one account. A registration number already verified or under review on another
+        account is refused; support can sort out genuine cases (a lost login, a new owner)."""
+        _, digits = registration_key(registration_no)
+        if not digits:
+            raise Unprocessable("Enter the registration number, e.g. RC 123456", code="invalid_registration_no")
+        rows = (await self.db.execute(
+            select(CompanyProfile, Account).join(Account, Account.id == CompanyProfile.account_id).where(
+                CompanyProfile.account_id != account.id, CompanyProfile.registration_no.is_not(None),
+                CompanyProfile.registration_no.contains(digits),
+                CompanyProfile.verification_status.in_([VerificationStatus.PENDING, VerificationStatus.PASSED]),
+                Account.status != AccountStatus.REMOVED))).all()
+        for other, _ in rows:
+            if not same_registration(other.registration_no, registration_no):
+                continue
+            if name_key(other.business_name) == name_key(company.business_name):
+                raise Conflict("This business is already registered on Wamiwa. If you think this is a mistake, "
+                               "contact support.", code="company_already_registered", hint="POST /support/tickets")
+            raise Conflict("This registration number is already used by another business on Wamiwa. If it's yours, "
+                           "contact support.", code="registration_number_in_use", hint="POST /support/tickets")
 
     async def apply_review(self, item: QueueItem, approved: bool, admin: Account, reason: str, payload: dict) -> None:
         account = await self.repo(Account).require(item.target_id)
@@ -64,10 +108,7 @@ class CompanyService(BaseService):
             if changes.get(field) is not None:
                 setattr(company, field, bool(changes[field]))
         if changes.get("region_targeting") is not None:
-            value = changes["region_targeting"]
-            company.region_targeting = core_regions.normalize(value)
-            if company.region_targeting is None and value.strip():
-                raise Unprocessable(f"Unknown region: {value}", code="unknown_region", hint="GET /regions lists them")
+            company.region_targeting = core_regions.require(changes["region_targeting"])
         if changes.get("bio") is not None:
             company.bio = changes["bio"]
         if changes.get("website") is not None:

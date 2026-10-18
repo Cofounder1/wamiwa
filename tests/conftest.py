@@ -1,5 +1,6 @@
 """Test harness: an in-memory app with a frozen clock, sandbox providers and a fake agent webhook."""
 import json
+import zlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -163,7 +164,7 @@ class Api:
     async def company(self, handle: str, admin: Actor, category: str = "fashion", region: str | None = None) -> Actor:
         actor = await self.signup(handle, kind="company", name=f"{handle.title()} Ltd", category=category, region=region)
         await self.ok("POST", "/companies/verification", actor,
-                      json={"registration_no": "RC123456", "document_ref": "docs/cac.pdf"})
+                      json={"registration_no": f"RC{zlib.crc32(handle.encode()) % 10**7}", "document_ref": "docs/cac.pdf"})
         await self.decide(admin, "company_verification", actor.id)
         return actor
 

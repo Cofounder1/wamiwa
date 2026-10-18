@@ -164,7 +164,8 @@ class IdentityVerification(Model):
     account_id: Mapped[str] = mapped_column(ForeignKey(FK_ACCOUNT), index=True)
     document_type: Mapped[str] = mapped_column(String(20))
     document_ref: Mapped[str] = mapped_column(String(255))  # encrypted object-store reference
-    selfie_ref: Mapped[str] = mapped_column(String(255))
+    selfie_ref: Mapped[str] = mapped_column(String(255))  # a frame from the live camera check
+    liveness_ref: Mapped[str | None] = mapped_column(String(255))  # the clip of the head turns
     status: Mapped[str] = mapped_column(String(16), default=VerificationStatus.PENDING)
     liveness_result: Mapped[bool | None] = mapped_column(Boolean)
     failure_reason: Mapped[str | None] = mapped_column(Text)

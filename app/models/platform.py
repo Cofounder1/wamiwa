@@ -184,3 +184,17 @@ class ReconciliationRun(Model):
     difference: Mapped[int] = mapped_column(BigInteger, default=0)
     note: Mapped[str | None] = mapped_column(Text)
     severity: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Upload(Model):
+    """Every uploaded file and who uploaded it, so a file can only be used by its owner, files nobody used are
+    cleaned up, and a deleted account's files are deleted too."""
+
+    __tablename__ = "uploads"
+
+    key: Mapped[str] = mapped_column(String(64), unique=True)  # kind/<random>.<ext>, as stored
+    owner_id: Mapped[str] = mapped_column(ForeignKey(FK_ACCOUNT), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    content_type: Mapped[str] = mapped_column(String(80))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)  # first attached to something

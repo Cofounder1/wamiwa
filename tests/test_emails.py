@@ -1,5 +1,4 @@
 """Every role hears about what concerns them by email, with a link to the right screen."""
-from datetime import timedelta
 
 from tests.test_hiring import PAY, hire_me_setup, offer
 from tests.test_platform import invite_admin

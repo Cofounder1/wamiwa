@@ -174,6 +174,7 @@ class GeneratedVideo(Model):
     warning_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     slow_notice_due: Mapped[bool] = mapped_column(Boolean, default=False)
     payment_id: Mapped[str | None] = mapped_column(String(32))
+    plan_videos_used: Mapped[int] = mapped_column(Integer, default=0)  # AV-02: given back if generation fails
     retries: Mapped[int] = mapped_column(Integer, default=0)
     posted_post_id: Mapped[str | None] = mapped_column(String(32))
 
@@ -193,6 +194,20 @@ class GuardianConfirmation(Model):
     recording_ref: Mapped[str | None] = mapped_column(String(255))
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class CreatorVideoPlan(Model):
+    """AV-02: an individual's monthly AI video plan. Each video of up to 2 minutes uses one of the month's videos;
+    longer ones use one per started 2 minutes. Standard quality only."""
+
+    __tablename__ = "creator_video_plans"
+
+    account_id: Mapped[str] = mapped_column(ForeignKey(FK_ACCOUNT), unique=True)
+    videos_left: Mapped[int] = mapped_column(Integer, default=0)
+    renews_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    payment_method: Mapped[str] = mapped_column(String(64))
 
 
 class BrandVideoPlan(Model):

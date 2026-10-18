@@ -1,4 +1,5 @@
 """Where uploaded files live. Local disk for development; a cloud bucket adapter replaces it later."""
+import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
@@ -31,17 +32,21 @@ class LocalFileStorage(FileStorage):
         return self.root / key
 
     async def save(self, key: str, chunks: AsyncIterator[bytes], max_bytes: int) -> int:
+        """Disk writes run in a worker thread, so a 200 MB video doesn't hold up other requests."""
         target = self._resolve(key)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
         partial, size = target.with_suffix(target.suffix + ".part"), 0
         try:
-            with open(partial, "wb") as handle:
+            handle = await asyncio.to_thread(open, partial, "wb")
+            try:
                 async for chunk in chunks:
                     size += len(chunk)
                     if size > max_bytes:
                         raise ValueError("file too large")
-                    handle.write(chunk)
-            os.replace(partial, target)
+                    await asyncio.to_thread(handle.write, chunk)
+            finally:
+                await asyncio.to_thread(handle.close)
+            await asyncio.to_thread(os.replace, partial, target)
         finally:
             if partial.exists():
                 partial.unlink()
@@ -57,4 +62,4 @@ class LocalFileStorage(FileStorage):
     async def delete(self, key: str) -> None:
         target = self.path(key)
         if target:
-            target.unlink()
+            target.unlink(missing_ok=True)
