@@ -89,7 +89,8 @@ class MoneyMovementService(BaseService):
         """Refunds decided but not yet made: the provider still holds that money."""
         return await self.repo(MoneyMovement).sum(
             MoneyMovement.amount, MoneyMovement.status == "pending", MoneyMovement.currency == currency,
-            MoneyMovement.kind == "refund")
+            MoneyMovement.kind == "refund",
+            ~(MoneyMovement.charge_ref.like("flwusd:%") | MoneyMovement.charge_ref.like("paypal:%")))
 
     async def notify_refund(self, account_id: str, amount: int, currency: str, data: dict | None = None) -> None:
         await self.svc.notifications.notify(

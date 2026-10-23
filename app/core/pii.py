@@ -38,12 +38,51 @@ def _kind(raw: str) -> str:
     return "phone number"
 
 
+# Number words, so "zero eight zero three one two three..." is caught as well as digits. English, plus the
+# Yoruba words for 0-9 (odo, ookan, eeji, eeta, eerin, aarun, eefa, eeje, eejo, eesan).
+NUMBER_WORDS = {
+    "zero": "0", "oh": "0", "o": "0", "nought": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "odo": "0", "ookan": "1", "okan": "1", "eeji": "2", "eji": "2", "eeta": "3", "eta": "3", "eerin": "4", "erin": "4",
+    "aarun": "5", "arun": "5", "eefa": "6", "efa": "6", "eeje": "7", "eje": "7", "eejo": "8", "ejo": "8",
+    "eesan": "9", "esan": "9",
+}
+REPEATS = {"double": 2, "triple": 3}
+TOKEN = re.compile(r"[a-z]+|\d")
+
+
+def _spelled_numbers(text: str) -> list[str]:
+    """Runs of 10 or more digits where at least some are written as words, e.g. "zero eight double zero one...".
+    Runs written only in digits are left to NUMBER."""
+    runs, current, words, repeat = [], "", False, 1
+
+    def close() -> None:
+        if len(current) >= 10 and words:
+            runs.append(current)
+
+    for token in TOKEN.findall(text.lower()):
+        if token in REPEATS:
+            repeat = REPEATS[token]
+            continue
+        digit = token if token.isdigit() else NUMBER_WORDS.get(token)
+        if digit is None:
+            close()
+            current, words, repeat = "", False, 1
+            continue
+        current += digit * repeat
+        words = words or not token.isdigit()
+        repeat = 1
+    close()
+    return runs
+
+
 def find(text: str | None) -> list[str]:
     """The kinds of personal information in the text, e.g. ["email address", "phone number"]."""
     if not text:
         return []
     kinds = ["email address"] * len(EMAIL.findall(text))
     kinds += [_kind(m.group()) for m in NUMBER.finditer(EMAIL.sub(" ", text))]
+    kinds += [_kind(run) for run in _spelled_numbers(EMAIL.sub(" ", text))]
     return sorted(set(kinds))
 
 

@@ -69,9 +69,11 @@ class IdentityIn(BaseModel):
 
 class BankIn(BaseModel):
     bank_code: str = Field(min_length=2, max_length=16)
-    account_number: str = Field(min_length=6, max_length=20, pattern=r"^\d+$")
+    account_number: str = Field(min_length=5, max_length=40, description="Account number, or IBAN for a foreign bank")
     account_name: str = Field(min_length=2, max_length=160)
     totp_code: str | None = None
+    details: dict[str, str] | None = Field(default=None, description=(
+        "Outside Nigeria: bank_name, swift_code or routing_number, beneficiary_address, beneficiary_country"))
 
 
 class SocialIn(BaseModel):
@@ -294,7 +296,7 @@ async def identity_status(p: Any_, svc: Services):
 @router.put("/verification/bank-account")
 async def save_bank_account(body: BankIn, p: Active, svc: Services):
     return ok(await svc.bank_accounts.save(p.account, body.bank_code, body.account_number, body.account_name,
-                                           body.totp_code))
+                                           body.totp_code, body.details))
 
 
 @router.get("/verification/bank-account")

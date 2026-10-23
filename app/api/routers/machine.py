@@ -1,13 +1,14 @@
 """Machine-facing APIs: the Agent API (Epic 12), the company API (API-01..03) and provider webhooks."""
+import hmac
 import json
 from typing import Literal
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import Agent, CompanyKey, Services, ok, ok_page, signed_body
 from app.core.enums import PostType
-from app.core.exceptions import Unprocessable
+from app.core.exceptions import NotFound, Unprocessable
 
 agent_router = APIRouter(prefix="/api/agent/v1", tags=["agent-api"])
 company_router = APIRouter(prefix="/api/company/v1", tags=["company-api"])
@@ -185,6 +186,20 @@ def _json(body: bytes) -> dict:
 async def payment_webhook(request: Request, svc: Services):
     data = _json(await signed_body(request, request.app.state.infra.settings.payment_webhook_secret))
     return ok(await svc.payment_events.handle(str(data.get("type")), str(data.get("provider_ref"))))
+
+
+@webhook_router.post("/africastalking/voice")
+async def africastalking_voice(request: Request, svc: Services, token: str = Query(default="")):
+    """LK-09 with Africa's Talking: it posts here during each confirmation call and Wamiwa answers with what to do
+    next. Set this address, with the token, as the voice callback URL of Wamiwa's number in its dashboard."""
+    expected = request.app.state.infra.settings.africastalking_callback_token
+    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+        raise NotFound("Not found")
+    form = await request.form()
+    xml = await svc.guardian_calls.step(
+        str(form.get("sessionId", "")), active=form.get("isActive") == "1",
+        digits=str(form.get("dtmfDigits") or "").strip("#") or None, recording_url=form.get("recordingUrl") or None)
+    return Response(xml, media_type="application/xml")
 
 
 @webhook_router.post("/voice")

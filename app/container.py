@@ -7,6 +7,12 @@ from app.infra.database import Database
 from app.infra.kv import InMemoryKeyValueStore, KeyValueStore, RedisKeyValueStore, ResilientKeyValueStore
 from app.infra.providers.base import EmailGateway
 from app.infra.providers.resend import ResendEmailGateway
+from app.infra.providers.africastalking import AfricasTalkingSmsGateway, AfricasTalkingVoiceGateway
+from app.infra.providers.base import SmsGateway, VoiceGateway
+from app.infra.providers.flutterwave import FlutterwaveGateway
+from app.infra.providers.payment_router import PaymentRouter
+from app.infra.providers.paypal import PayPalGateway
+from app.infra.providers.unavailable import IdentityNotConnected, PaymentsNotConnected, PayPalNotConnected
 from app.infra.providers.sandbox import (
     HttpxWebhookTransport, SandboxEmailGateway, SandboxLinkSafetyGateway, SandboxMusicCatalogGateway, SandboxTrendGateway, SandboxIdentityGateway, SandboxModerationGateway,
     SandboxPaymentGateway, SandboxSmsGateway, SandboxSocialGateway, SandboxVideoGateway,
@@ -26,27 +32,53 @@ def build_email(settings: Settings) -> EmailGateway:
     return SandboxEmailGateway()
 
 
+def build_sms_and_voice(settings: Settings) -> tuple[SmsGateway, VoiceGateway]:
+    """Africa's Talking once its username and key are set; calls also need its voice number and callback token."""
+    at = settings.africastalking_username and settings.africastalking_api_key
+    sms = (AfricasTalkingSmsGateway(settings.africastalking_username, settings.africastalking_api_key,
+                                    settings.africastalking_sender_id) if at else SandboxSmsGateway())
+    calls = at and settings.africastalking_voice_number and settings.africastalking_callback_token
+    voice = (AfricasTalkingVoiceGateway(settings.africastalking_username, settings.africastalking_api_key,
+                                        settings.africastalking_voice_number) if calls else SandboxVoiceGateway())
+    return sms, voice
+
+
 def build_providers(settings: Settings) -> Providers:
     """Sandbox adapters until the vendors in PRD section 19 are chosen and credentialed.
 
-    To go live, implement the matching port in app/infra/providers/base.py (e.g. a
-    KorapayPaymentGateway) and return it here based on settings.
+    To go live, implement the matching port in app/infra/providers/base.py (as FlutterwaveGateway does)
+    and return it here based on settings.
     """
+    # On the live site a stand-in would approve every payment and ID check, so they refuse until connected.
+    stand_ins_allowed = not settings.is_production or settings.allow_stand_in_providers
+    if settings.flutterwave_secret_key:
+        payments = FlutterwaveGateway(settings.flutterwave_secret_key)
+    else:
+        payments = SandboxPaymentGateway() if stand_ins_allowed else PaymentsNotConnected()
+    # PY-05: PayPal is a second way to pay, off until its credentials are set. It has no stand-in.
+    if settings.paypal_client_id and settings.paypal_secret:
+        paypal = PayPalGateway(settings.paypal_client_id, settings.paypal_secret, settings.paypal_environment)
+    else:
+        paypal = PayPalNotConnected()
+    sms, voice = build_sms_and_voice(settings)
     return Providers(
-        identity=SandboxIdentityGateway(),
-        payments=SandboxPaymentGateway(),
-        fx=StaticFxRateProvider({("USD", settings.local_currency): settings.sandbox_fx_rate}),
+        identity=SandboxIdentityGateway() if stand_ins_allowed else IdentityNotConnected(),
+        payments=PaymentRouter(payments, paypal),
+        # The day's rate comes from Flutterwave once it is connected, so conversions match the money it moves.
+        fx=payments if isinstance(payments, FlutterwaveGateway)
+        else StaticFxRateProvider({("USD", settings.local_currency): settings.sandbox_fx_rate}),
         video=SandboxVideoGateway(),
         watermark=SandboxWatermarkGateway(),
         email=build_email(settings),
-        sms=SandboxSmsGateway(),
-        voice=SandboxVoiceGateway(),
+        sms=sms,
+        voice=voice,
         moderation=SandboxModerationGateway(),
         social=SandboxSocialGateway(),
         webhooks=HttpxWebhookTransport(settings.webhook_timeout_seconds),
         trends=SandboxTrendGateway(),
         music=SandboxMusicCatalogGateway(),
         link_safety=SandboxLinkSafetyGateway(),
+        paypal=paypal,
     )
 
 

@@ -26,11 +26,11 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | --- | --- |
 | Stack | Python 3.13, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic, Redis |
 | Size | About 15,700 lines of application code |
-| API | 271 operations: 209 for people and companies, 45 for admins, 13 for agents (`/api/agent/v1`), 4 for the company API (`/api/company/v1`), plus signed webhooks for payments, calls and video |
+| API | 273 operations: 211 for people and companies, 45 for admins, 13 for agents (`/api/agent/v1`), 4 for the company API (`/api/company/v1`), plus signed webhooks for payments, calls and video |
 | API reference | http://127.0.0.1:8000/docs while the server runs |
 | Data | 64 tables |
 | Scheduled jobs | 31, listed below |
-| Tests | 89 end-to-end tests: `.venv/bin/python -m pytest` |
+| Tests | 98 end-to-end tests: `.venv/bin/python -m pytest` |
 | Run it | `.venv/bin/uvicorn app.main:app_factory --factory --reload`, or `docker compose up --build` |
 | Docker | `Dockerfile` (one image for the API and the jobs worker) and `docker-compose.yml` (API, worker, Redis, local Postgres 17) |
 
@@ -52,9 +52,9 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Item | Detail |
 | --- | --- |
 | Live database | Supabase Postgres 17 (eu-west-1), through the session pooler |
-| Migrations applied | `2e6abe18847b` initial schema, `b4cc7e7ca3d5` Wamiwa Agent, `8473ca052e38` refund records, `82aa8d097ef4` post and comment edits, `066deee9d01c` Pro tier, live check clip, upload records, AI video plan and comment count correction. Render applies new migrations itself on each deploy (`alembic upgrade head` in the start command) |
+| Migrations applied | `2e6abe18847b` initial schema, `b4cc7e7ca3d5` Wamiwa Agent, `8473ca052e38` refund records, `82aa8d097ef4` post and comment edits, `066deee9d01c` Pro tier, live check clip, upload records, AI video plan and comment count correction; `c2d26f2b1566` equity offers. Render applies new migrations itself on each deploy (`alembic upgrade head` in the start command) |
 | Data in it | Only the built-in Wamiwa Agent account. No demo or real users |
-| Tested on it | 15 of the 89 tests, covering every major area. All pass |
+| Tested on it | 15 of the 98 tests, covering every major area. All pass |
 
 ## Third-party services
 
@@ -63,14 +63,16 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Supabase | Database | Connected |
 | Resend | Email | Connected. Domain `wamiwa.site` verified; sends as `info@wamiwa.site`, replies go to `info@wamiwa.site` |
 | HeyGen | AI video | Key works (allowance of 300). Not connected: awaiting a trial and answers on price, languages and minors |
-| Korapay | Payments, escrow, payouts | Not started. Need test keys, and confirmation it can hold funds before release |
+| Flutterwave | Payments, escrow, payouts (Naira and US dollars) | Built and tested against a fake Flutterwave; needs its keys set (see .env.example) |
+| Exchange rate | The day's dollar to Naira rate | Taken from Flutterwave once its keys are set; a fixed test rate (1,500) until then |
+| PayPal | A second way to pay, in US dollars (payouts stay with Flutterwave) | Built and tested against a fake PayPal; off until Wamiwa's PayPal account and API keys are ready. Until then it refuses with "PayPal isn't available yet" |
 | YouVerify | ID and liveness checks | Not started |
-| SMS and voice calls | Phone codes, guardian confirmation calls | Vendor not chosen |
+| Africa's Talking | Phone codes and alerts by SMS, guardian confirmation calls | Built and tested against a fake Africa's Talking; needs its settings (see .env.example) and the voice callback URL set on Wamiwa's number |
 | Moderation and sentiment | Content checks, sentiment in five languages | Vendor not chosen |
 | Video watermarking | Tracing likeness videos | Vendor not chosen |
 | Google Web Risk | Scam-link checks | Recommended (free to 100,000 checks a month); not connected |
 | Trends data | Plus content ideas | Recommended: YouTube regional charts, plus applying to the Google Trends pilot; not connected |
-| Spotify, YouTube Music, Audiomack | Finding artists' default profiles | Access not confirmed |
+| Spotify, YouTube Music, Apple Music | Finding artists' default profiles | Keys added for all three; lookups still run on the stand-in until connected |
 | Instagram, TikTok, X, YouTube, Facebook | Creator verification, friend import | Developer apps not created |
 | Redis | Rate limits, codes, cache, job locks | Render Key Value for the live API; runs in Docker locally |
 
@@ -115,7 +117,7 @@ Anything not connected runs on a built-in stand-in, so the whole app works for d
 - Move the API off Render's free plan before real users: it sleeps after 15 idle minutes, and scheduled jobs stop while it sleeps.
 - Move uploads off the server's disk (Render wipes it on each deploy).
 - Stop the local dev server using Supabase directly; point local `.env` at a local database.
-- Choose and connect the remaining vendors above, starting with Korapay.
+- Set the Flutterwave keys, then the PayPal keys once Wamiwa's PayPal account is ready; then choose and connect the remaining vendors above.
 - Lawyer review items in PRD section 21, especially whether Wamiwa may hold escrow itself.
 - Load demo accounts into the local Docker database for frontend work (`seed-demo`); Supabase stays clean.
 - Align the frontend with the backend: its Agents feed has rooms and voting that the PRD left out, and it keeps its own copy of the PRD.

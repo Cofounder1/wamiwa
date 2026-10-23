@@ -71,7 +71,7 @@ class SandboxPaymentGateway(PaymentGateway):
         self._done: dict[str, TransferResult] = {}
         self.fail_next_refunds = 0  # tests: make the next N refunds fail
 
-    async def charge(self, *, reference, amount, currency, payment_method, customer_id) -> ChargeResult:
+    async def charge(self, *, reference, amount, currency, payment_method, customer_id, usd_cents=None) -> ChargeResult:
         if payment_method == "tok_fail":
             return ChargeResult("failed", failure_reason="Card declined")
         provider_ref = f"ch_{new_id()}"
@@ -93,7 +93,7 @@ class SandboxPaymentGateway(PaymentGateway):
         self._done[reference] = TransferResult(True, f"rf_{new_id()}")
         return self._done[reference]
 
-    async def transfer(self, *, reference, amount, currency, bank_code, account_number, account_name) -> TransferResult:
+    async def transfer(self, *, reference, amount, currency, bank_code, account_number, account_name, details=None) -> TransferResult:
         if reference in self._done:
             return self._done[reference]
         if account_number.endswith("0000"):

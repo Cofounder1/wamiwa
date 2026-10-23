@@ -166,9 +166,9 @@ async def test_artists_and_labels_share_the_links_they_choose(api):
 
     # A name another verified account holds cannot be bought, and nothing is charged.
     copycat = await api.influencer("copycat", "Copy Cat")
-    charges = len(api.infra.providers.payments.charges)
+    charges = len(api.infra.providers.payments.main.charges)
     r = await api.call("POST", "/promotions", copycat, json=body | {"brand_name": "OSHAMO"}, expect=409)
-    assert r.json()["code"] == "name_taken" and len(api.infra.providers.payments.charges) == charges
+    assert r.json()["code"] == "name_taken" and len(api.infra.providers.payments.main.charges) == charges
     # A name that is someone else's handle waits for a person to check it.
     contested = await api.ok("POST", "/promotions", copycat, json=body | {"brand_name": "Creator"})
     assert contested["names"][0]["status"] == "pending"
@@ -276,16 +276,16 @@ async def test_individual_sellers_and_suggested_sellers(api):
     assert changed["status"] == "pending_review"
     other = await api.influencer("bisi", "Bisi Ade")
     applied = await api.ok("POST", "/promotions", other, json=body | {"brand_name": "Bisi Bags"})
-    refunds = api.infra.providers.payments.refunds
+    refunds = api.infra.providers.payments.main.refunds
     before = len(refunds)
     await api.decide(admin, "promotions", applied["id"], decision="reject", reason="Link leads to a betting site")
     assert refunds[before]["amount"] == kobo(20_00) and (await api.ok("GET", "/promotions", other))["status"] == "rejected"
 
     # A seller cannot take a name that is a verified company's, and is not charged for trying.
     clash = await api.influencer("clash", "Clash Person")
-    charges = len(api.infra.providers.payments.charges)
+    charges = len(api.infra.providers.payments.main.charges)
     taken = await api.call("POST", "/promotions", clash, json=body | {"brand_name": "Kofishirts Ltd"}, expect=409)
-    assert taken.json()["code"] == "name_taken" and len(api.infra.providers.payments.charges) == charges
+    assert taken.json()["code"] == "name_taken" and len(api.infra.providers.payments.main.charges) == charges
 
 
 async def test_plus_package_content_ideas_for_target_regions(api):
@@ -341,10 +341,10 @@ async def test_default_links_when_none_are_added(api):
     post = await api.ok("POST", "/posts", creator, json={"type": "text", "text": "New music Friday"})
     pid = post["id"]
 
-    # An artist who adds no links: we look on Spotify, then YouTube Music, then Audiomack, and use the first found.
+    # An artist who adds no links: we look on Spotify, then YouTube Music, then Apple Music, and use the first found.
     yt = "https://music.youtube.com/channel/UCzino123"
     music.artists[("youtube_music", "zinolee")] = yt
-    music.artists[("audiomack", "zinolee")] = "https://audiomack.com/zinolee"
+    music.artists[("apple_music", "zinolee")] = "https://music.apple.com/ng/artist/zinolee/123"
     artist = await api.influencer("zinolee_ng", "Zino Lee")
     plan = await api.ok("POST", "/promotions", artist, json={"kind": "artist", "brand_name": "Zinolee", "payment_method": PAY})
     assert plan["links"] == [] and plan["names"][0]["default_link"] == {"url": yt, "label": "YouTube Music"}
@@ -369,11 +369,11 @@ async def test_default_links_when_none_are_added(api):
     # A label's artist with no links gets the same treatment; one found nowhere has nothing to share.
     label = await api.company("bigwave", admin, category="music")
     await api.ok("POST", "/promotions", label, json={"kind": "label", "payment_method": PAY})
-    music.artists[("audiomack", "tidewater")] = "https://audiomack.com/tidewater"
+    music.artists[("apple_music", "tidewater")] = "https://music.apple.com/ng/artist/tidewater/456"
     roster = await api.ok("POST", "/promotions/names", label, json={"name": "Tidewater"})
     roster = await api.ok("POST", "/promotions/names", label, json={"name": "Nobody Knows Them"})
     defaults = {n["name"]: n["default_link"] for n in roster["names"]}
-    assert defaults["Tidewater"]["label"] == "Audiomack" and defaults["Nobody Knows Them"] is None
+    assert defaults["Tidewater"]["label"] == "Apple Music" and defaults["Nobody Knows Them"] is None
 
     # A business that adds no links: the website on its company profile is shared.
     brand = await api.company("kofishirts", admin, category="fashion")

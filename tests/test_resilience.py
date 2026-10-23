@@ -15,17 +15,17 @@ def no_raise_client(api) -> httpx.AsyncClient:
 
 async def test_checks_run_before_any_charge(api):
     _, brand, influencer = await likeness_setup(api)
-    charges = len(api.infra.providers.payments.charges)
+    charges = len(api.infra.providers.payments.main.charges)
     r = await api.call("POST", "/likeness/contracts", brand, expect=409, json={
         "influencer_id": influencer.id, "script": "Hello, I use Acme to save every month.", "use_plan": True,
         "payment_method": PAY})
     assert r.json()["code"] == "plan_exhausted"
-    assert len(api.infra.providers.payments.charges) == charges  # nobody was charged
+    assert len(api.infra.providers.payments.main.charges) == charges  # nobody was charged
 
 
 async def test_a_charge_is_reversed_when_its_request_fails(api):
     user = await api.influencer("maker", "Maker Person")
-    payments = api.infra.providers.payments
+    payments = api.infra.providers.payments.main
 
     async def video_service_down(_request):
         raise RuntimeError("video service unreachable")
@@ -44,7 +44,7 @@ async def test_a_charge_is_reversed_when_its_request_fails(api):
 
 async def test_refunds_happen_only_after_the_decision_is_saved_and_are_retried(api):
     _, brand, influencer = await hire_me_setup(api)
-    payments = api.infra.providers.payments
+    payments = api.infra.providers.payments.main
     contract = await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer))
 
     # A refund decided inside a transaction that then fails is never sent.
@@ -78,7 +78,7 @@ async def test_payouts_are_sent_after_saving_and_never_twice(api):
     await api.ok("POST", f"/hire-me/contracts/{contract['id']}/accept", influencer)
     await api.ok("POST", f"/hire-me/contracts/{contract['id']}/deliver", influencer, json={"delivery": "done"})
     await api.ok("POST", f"/hire-me/contracts/{contract['id']}/approve", brand)
-    transfers = api.infra.providers.payments.transfers
+    transfers = api.infra.providers.payments.main.transfers
     assert (await api.run("payouts.run_cycle"))["sending"] == 1
     assert len(transfers) == 1 and (await api.ok("GET", "/payouts", influencer))[0]["status"] == "paid"
 
@@ -135,7 +135,7 @@ async def test_a_redis_outage_degrades_instead_of_failing(api):
         assert r.json()["code"] == "temporarily_unavailable" and r.headers["Retry-After"]
         # Health tells the truth.
         health = await api.call("GET", "/health", expect=503)
-        assert health.json() == {"status": "degraded", "database": "ok", "cache": "unavailable"}
+        assert {k: health.json()[k] for k in ("status", "database", "cache")} == {"status": "degraded", "database": "ok", "cache": "unavailable"}
         await api.call("GET", "/health/live", expect=200)
         # No scheduled job runs while its lock cannot be taken (money jobs must never run twice).
         assert await api.jobs.run_due() == []

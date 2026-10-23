@@ -220,7 +220,8 @@ class BankAccount(Model):
 
     account_id: Mapped[str] = mapped_column(ForeignKey(FK_ACCOUNT), unique=True)
     bank_code: Mapped[str] = mapped_column(String(16))
-    account_number: Mapped[str] = mapped_column(String(20))
+    account_number: Mapped[str] = mapped_column(String(64))  # a Nigerian account number, or a foreign account/IBAN
+    details: Mapped[dict | None] = mapped_column(JSON)  # PY-05 foreign banks: bank name, SWIFT or routing, address
     account_name: Mapped[str] = mapped_column(String(160))
     verified: Mapped[bool] = mapped_column(Boolean, default=False)  # name matches the verified ID
     hold_until: Mapped[datetime | None] = mapped_column(UTCDateTime)

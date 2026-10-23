@@ -1,5 +1,6 @@
 """Epic 6 money path: FX, charges, escrow state machine, payouts, chargebacks and reconciliation."""
-from datetime import timedelta
+import json
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -9,26 +10,53 @@ from app.core.enums import (
     AccountStatus, ContractStatus, EscrowState, NotificationType, PaymentPurpose, PaymentStatus,
     PayoutStatus, Permission, Queue,
 )
-from app.core.exceptions import Conflict, Forbidden, NotFound, PaymentRequired, Unprocessable
+from app.core.exceptions import Conflict, Forbidden, NotFound, PaymentRequired, ServiceUnavailable, Unprocessable
 from app.core.utils import Page, add_working_days, convert_minor, new_id, pct_of
 from app.models import (
     Account, AdminPermission, Contract, EscrowTransaction, GuardianConfirmation, LedgerEntry, Payment,
     Payout, QueueItem, ReconciliationRun,
 )
+from app.infra.providers.base import reference_prefix
 from app.services.base import BaseService, ServiceContext
 
 
 class FxService(BaseService):
     BASE = "USD"
+    FALLBACK_TTL = 15 * 60
 
     async def rate(self) -> Decimal:
-        """Today's USD -> local rate. Cached for the day so every quote that day uses the same rate."""
+        """Today's USD -> local rate. Cached for the day so every quote that day uses the same rate. If the provider
+        can't give one, the last rate it gave is used, and admins are told once a day while it is getting old."""
         key = f"fx:{self.BASE}:{self.s.local_currency}:{self.clock.today().isoformat()}"
+        last_key = f"fx:last:{self.BASE}:{self.s.local_currency}"
 
-        async def load() -> str:
-            return str(await self.providers.fx.rate(self.BASE, self.s.local_currency))
+        cached = await self.cache.get(key)
+        if cached is not None:
+            return Decimal(cached)
+        try:
+            rate = str(await self.providers.fx.rate(self.BASE, self.s.local_currency))
+        except Exception as exc:  # noqa: BLE001 - any provider failure falls back to the last rate
+            rate = await self._last_rate(last_key, exc)
+            await self.cache.set(key, rate, self.FALLBACK_TTL)  # ask the provider again soon
+            return Decimal(rate)
+        await self.kv.set(last_key, json.dumps({"rate": rate, "on": self.clock.today().isoformat()}))
+        await self.cache.set(key, rate, self.s.cache_ttl_fx)
+        return Decimal(rate)
 
-        return Decimal(await self.cache.get_or_set(key, self.s.cache_ttl_fx, load))
+    async def _last_rate(self, last_key: str, error: Exception) -> str:
+        saved = await self.kv.get(last_key)
+        if saved is None:
+            raise ServiceUnavailable("Prices in Naira aren't available right now. Try again shortly.",
+                                     code="fx_unavailable") from error
+        last = json.loads(saved)
+        age = (self.clock.today() - date.fromisoformat(last["on"])).days
+        if age >= self.s.fx_stale_alert_days and await self.kv.set_if_absent(
+                f"fx:stale-alert:{self.clock.today().isoformat()}", "1", 24 * 3600):
+            await self.svc.admin.alert_admins(
+                "Exchange rate is out of date",
+                f"The payment provider gave no USD rate today ({error}). Prices use the rate from {last['on']}, "
+                f"{age} days old: {last['rate']} {self.s.local_currency} per dollar.")
+        return last["rate"]
 
     async def to_local(self, amount_cents: int) -> tuple[int, Decimal]:
         rate = await self.rate()
@@ -45,9 +73,10 @@ class PaymentService(BaseService):
         reference = f"{purpose}_{new_id()}"
         result = await self.providers.payments.charge(
             reference=reference, amount=amount_local, currency=self.s.local_currency,
-            payment_method=payment_method, customer_id=account.id)
+            payment_method=payment_method, customer_id=account.id, usd_cents=amount_cents)
         if result.status == "failed":
             raise PaymentRequired(result.failure_reason or "Payment failed", code="payment_failed")
+        await self.ensure_unused(result.provider_ref)
         self.svc.money.undo_charge_if_rolled_back(result.provider_ref, amount_local, self.s.local_currency, reference)
         what = {"subscription": "your Wamiwa subscription", "ai_video": "an AI video", "video_production": "video production",
                 "video_plan": "your video plan", "extra_render": "an extra final render", "arcon_filing": "ARCON filing",
@@ -60,7 +89,54 @@ class PaymentService(BaseService):
             account_id=account.id, purpose=purpose, amount_cents=amount_cents, amount_local=amount_local,
             currency=self.s.local_currency, fx_rate=str(rate), provider_ref=result.provider_ref,
             status=PaymentStatus.SUCCEEDED if result.status == "succeeded" else PaymentStatus.PENDING_RISK,
-            reference_id=reference_id))
+            reference_id=reference_id, reusable_method=result.reusable_method))
+
+    def is_international(self, account: Account) -> bool:
+        """PY-05: anyone whose country isn't Wamiwa's home country pays and is paid in dollars."""
+        return bool(account.region and account.region != self.s.home_region)
+
+    def currency_for(self, account: Account) -> str:
+        return "USD" if self.is_international(account) else self.s.local_currency
+
+    async def method(self, account: Account) -> dict[str, Any]:
+        """How this person can pay: Flutterwave's checkout, in Naira at home and US dollars elsewhere, or PayPal,
+        always in dollars, once it is connected."""
+        connected = bool(self.s.flutterwave_secret_key and self.s.flutterwave_public_key)
+        paypal = bool(self.s.paypal_client_id and self.s.paypal_secret)
+        return {"provider": "flutterwave" if connected else "stand_in", "currency": self.currency_for(account),
+                "public_key": self.s.flutterwave_public_key if connected else None, "available": connected,
+                "paypal": {"available": paypal, "currency": "USD", "client_id": self.s.paypal_client_id if paypal else None,
+                           "environment": self.s.paypal_environment if paypal else None}}
+
+    async def start_checkout(self, account: Account, amount_cents: int, description: str) -> dict[str, Any]:
+        """What the checkout window needs. The reference carries the account id, and the amount is checked again
+        against the real price when the payment is used, so nothing here can be tampered with."""
+        await self.limiter.enforce(self.policies.payments, account.id)
+        currency = self.currency_for(account)
+        amount = amount_cents if currency == "USD" else (await self.svc.fx.to_local(amount_cents))[0]
+        return {"tx_ref": f"{reference_prefix(account.id)}{new_id()}", "amount": f"{amount / 100:.2f}",
+                "currency": currency, "public_key": self.s.flutterwave_public_key, "description": description[:100],
+                "customer": {"email": account.email, "name": account.display_name}}
+
+    async def start_paypal_order(self, account: Account, amount_cents: int, description: str) -> dict[str, Any]:
+        """Step 1 of paying with PayPal: an order for the price in dollars, for the payer to approve. It carries the
+        account id, and its amount is checked again against the real price when it is used."""
+        await self.limiter.enforce(self.policies.payments, account.id)
+        order_id = await self.providers.paypal.create_order(
+            amount_cents=amount_cents, description=description or "Wamiwa", reference=f"{reference_prefix(account.id)}{new_id()}")
+        return {"order_id": order_id, "payment_method": f"paypal:{order_id}", "amount": f"{amount_cents / 100:.2f}",
+                "currency": "USD"}
+
+    @staticmethod
+    def renewal_method(payment: Payment, given: str) -> str:
+        """What to charge next time: the card the provider saved, not the one-time transaction just used."""
+        return payment.reusable_method or given
+
+    async def ensure_unused(self, provider_ref: str | None) -> None:
+        """One payment pays for one thing: a transaction already recorded can't be sent again for something else."""
+        if provider_ref and (await self.repo(Payment).exists(Payment.provider_ref == provider_ref)
+                             or await self.repo(EscrowTransaction).exists(EscrowTransaction.provider_ref == provider_ref)):
+            raise Conflict("This payment has already been used", code="payment_already_used")
 
     async def refund(self, payment_id: str | None, amount_local: int | None = None) -> Payment | None:
         if not payment_id:
@@ -133,9 +209,10 @@ class EscrowService(BaseService):
         amount = convert_minor(contract.price_cents, Decimal(str(contract.fx_rate)))
         result = await self.providers.payments.charge(
             reference=f"escrow_{contract.id}", amount=amount, currency=contract.currency,
-            payment_method=payment_method, customer_id=hirer.id)
+            payment_method=payment_method, customer_id=hirer.id, usd_cents=contract.price_cents)
         if result.status == "failed":
             raise PaymentRequired(result.failure_reason or "Payment failed", code="payment_failed")
+        await self.svc.payment.ensure_unused(result.provider_ref)
         self.svc.money.undo_charge_if_rolled_back(result.provider_ref, amount, contract.currency, f"escrow_{contract.id}")
         escrow = await self.repo(EscrowTransaction).add(EscrowTransaction(
             contract_id=contract.id, hirer_id=contract.hirer_id, earner_id=contract.earner_id, amount=amount,
@@ -325,9 +402,15 @@ class PayoutService(BaseService):
         payout = await self.repo(Payout).lock(payout_id)
         bank, blocked_reason = await self.svc.bank_accounts.payable(payout.account_id)
         escrows = list(await self.repo(EscrowTransaction).list(EscrowTransaction.payout_id == payout.id))
-        result = None if bank is None else await self.providers.payments.transfer(
-            reference=f"payout_{payout.id}", amount=payout.amount, currency=payout.currency,
-            bank_code=bank.bank_code, account_number=bank.account_number, account_name=bank.account_name)
+        result = None
+        if bank is not None:
+            amount, currency = payout.amount, payout.currency
+            if bank.bank_code == "intl":  # PY-05: foreign banks are paid in dollars at the day's rate
+                rate = await self.svc.fx.rate()  # the day's rate, as for every other conversion
+                amount, currency = int((Decimal(payout.amount) / rate).quantize(Decimal("1"))), "USD"
+            result = await self.providers.payments.transfer(
+                reference=f"payout_{payout.id}", amount=amount, currency=currency, bank_code=bank.bank_code,
+                account_number=bank.account_number, account_name=bank.account_name, details=bank.details)
         if result is None or not result.succeeded:
             payout.status = PayoutStatus.HELD if bank is None else PayoutStatus.FAILED
             payout.failure_reason = blocked_reason if bank is None else result.failure_reason
@@ -486,15 +569,22 @@ class ReconciliationService(BaseService):
     async def run(self) -> ReconciliationRun:
         """Job (section 20): escrow balances reconcile with the provider daily; mismatches alert Super Admins."""
         currency = self.s.local_currency
-        held = await self.repo(EscrowTransaction).sum(EscrowTransaction.amount, EscrowTransaction.currency == currency)
+
+        def local(column):  # dollar payments (Flutterwave's dollar balance, PayPal) are reconciled separately
+            return column.is_(None) | ~(column.like("flwusd:%") | column.like("paypal:%"))
+
+        held = await self.repo(EscrowTransaction).sum(EscrowTransaction.amount, EscrowTransaction.currency == currency,
+                                                      local(EscrowTransaction.provider_ref))
         refunded = await self.repo(EscrowTransaction).sum(
             EscrowTransaction.refunded_amount, EscrowTransaction.currency == currency,
-            EscrowTransaction.charged_back.is_(False))
+            EscrowTransaction.charged_back.is_(False), local(EscrowTransaction.provider_ref))
         charged_back = await self.repo(EscrowTransaction).sum(
-            EscrowTransaction.amount, EscrowTransaction.currency == currency, EscrowTransaction.charged_back.is_(True))
-        paid_out = await self.repo(Payout).sum(Payout.amount, Payout.status == PayoutStatus.PAID, Payout.currency == currency)
+            EscrowTransaction.amount, EscrowTransaction.currency == currency, EscrowTransaction.charged_back.is_(True),
+            local(EscrowTransaction.provider_ref))
+        paid_out = await self.repo(Payout).sum(Payout.amount, Payout.status == PayoutStatus.PAID, Payout.currency == currency,
+                                               local(Payout.provider_ref))
         charges = await self.repo(Payment).sum(
-            Payment.amount_local - Payment.refunded_local, Payment.currency == currency,
+            Payment.amount_local - Payment.refunded_local, Payment.currency == currency, local(Payment.provider_ref),
             Payment.status.in_([PaymentStatus.SUCCEEDED, PaymentStatus.PENDING_RISK, PaymentStatus.REFUNDED]))
         # Refunds already decided but not yet made at the provider are still in its balance.
         expected = held - refunded - charged_back - paid_out + charges + await self.svc.money.pending_total(currency)

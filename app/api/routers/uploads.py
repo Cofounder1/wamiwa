@@ -9,6 +9,7 @@ attachment, a likeness photo, an ID document). Who can fetch a file back depends
   likeness_voice, id_document, never served back; only Wamiwa's own services read them
   liveness                     (liveness: the live camera frame and clip taken during ID verification)
 """
+import asyncio
 import logging
 import secrets
 from typing import AsyncIterator
@@ -18,7 +19,7 @@ from fastapi.responses import FileResponse
 
 from app.api.deps import Active, Services, ok
 from app.core.exceptions import NotFound, ServiceUnavailable, Unprocessable
-from app.infra import filetypes
+from app.infra import filetypes, metadata
 from app.infra.storage import FileStorage, LocalFileStorage
 
 router = APIRouter(tags=["uploads"])
@@ -77,6 +78,10 @@ async def upload_file(request: Request, p: Active, svc: Services, kind: str = Fo
         log.exception("could not store upload %s", key)
         raise ServiceUnavailable("We couldn't store your file right now. Try again shortly.",
                                  code="storage_unavailable") from exc
+    if kind in PUBLIC_KINDS:  # photos and videos are public: remove the GPS position and other hidden metadata
+        stored = storage(request).path(key)
+        if stored is not None:
+            size = await asyncio.to_thread(metadata.scrub_file, stored, content_type)
     await svc.uploads.record(p.account, key, kind, content_type, size)
     url = f"/media/{key}" if kind in PUBLIC_KINDS | MEMBER_KINDS else None
     return ok({"ref": key, "kind": kind, "size_bytes": size, "content_type": content_type, "url": url})

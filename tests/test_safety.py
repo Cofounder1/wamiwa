@@ -92,8 +92,18 @@ async def test_businesses_need_a_payment_in_the_last_90_days_and_minors_chats_st
 async def test_racism_and_yoruba_insult_reports_go_to_the_investigation_team(api):
     root = await api.admin()
     mod = await invite_admin(api, root, "mod")
-    offender, reporter, viewer = await api.signup("offender"), await api.signup("ife"), await api.signup("seyi")
+    offender, reporter, viewer = await api.signup("offender"), await api.signup("ife", name="Ife Ade"), await api.signup("seyi")
     post = await api.ok("POST", "/posts", offender, json={"type": "text", "text": "An insulting post"})
+
+    # One report from an unverified account doesn't hide anything on its own; a second reporter does.
+    first, second_reporter = await api.signup("kayode"), await api.signup("bimpe")
+    await api.ok("POST", "/reports", first, json={
+        "target_type": "post", "target_id": post["id"], "reason": "racism_ethnic_insult", "details": "Insults"})
+    await api.ok("GET", f"/posts/{post['id']}", viewer)
+    await api.ok("POST", "/reports", second_reporter, json={
+        "target_type": "post", "target_id": post["id"], "reason": "racism_ethnic_insult", "details": "Insults"})
+    await api.call("GET", f"/posts/{post['id']}", viewer, expect=404)
+    await api.verify_id(reporter, "Ife Ade")  # a verified reporter with a clean record is trusted straight away
 
     report = await api.ok("POST", "/reports", reporter, json={
         "target_type": "post", "target_id": post["id"], "reason": "racism_ethnic_insult", "details": "Insults Yoruba people"})
@@ -154,3 +164,64 @@ async def test_a_registered_business_cannot_register_again(api):
     assert r.json()["code"] == "registration_number_in_use"
     # BN (business name) numbers are a different registry, so the same digits are a different business.
     await api.ok("POST", "/companies/verification", other_name, json={"registration_no": "BN 123456", "document_ref": "docs/bn.pdf"})
+
+
+async def test_live_site_refuses_stand_in_payments_and_id_checks():
+    """Until Flutterwave and YouVerify are connected, nothing on the live site can be 'paid' for or 'verified' free."""
+    import pytest
+    from app.container import build_providers
+    from app.core.config import Settings
+    from app.core.exceptions import ServiceUnavailable
+
+    live = build_providers(Settings(_env_file=None, env="production"))
+    with pytest.raises(ServiceUnavailable) as paid:
+        await live.payments.charge(reference="r", amount=100, currency="NGN", payment_method="tok_visa", customer_id="c")
+    assert paid.value.code == "payments_unavailable"
+    with pytest.raises(ServiceUnavailable) as checked:
+        await live.identity.verify("passport", "Ada Obi|1990-05-01", "liveness/x.jpg")
+    assert checked.value.code == "identity_unavailable"
+    local = build_providers(Settings(_env_file=None, env="development"))
+    assert type(local.payments.main).__name__ == "SandboxPaymentGateway"
+    # PayPal has no stand-in anywhere: until it's connected it refuses, even in development.
+    with pytest.raises(ServiceUnavailable) as paypal:
+        await local.payments.charge(reference="r", amount=100, currency="NGN", payment_method="paypal:X", customer_id="c")
+    assert paypal.value.code == "paypal_unavailable"
+
+
+async def test_one_id_one_account(api):
+    first, second = await api.signup("ada", name="Ada Obi"), await api.signup("ada2", name="Ada Obi")
+    await api.verify_id(first, "Ada Obi")
+    r = await api.ok("POST", "/verification/identity", second, json={
+        "document_type": "passport", "document_ref": "ADA  OBI|1990-05-01", "selfie_ref": "selfie-2"})
+    assert r["status"] == "failed" and "already verified on another Wamiwa account" in r["reason"]
+    assert not (await api.ok("GET", "/accounts/me", second))["profile"]["id_verified"]
+    admin = await api.admin()
+    assert any(i["target_type"] == "duplicate_identity" for i in await api.ok("GET", "/admin/queues/identity", admin))
+
+
+async def test_photo_location_is_removed_on_upload(api, tmp_path):
+    import struct
+    api.infra.settings.upload_dir = str(tmp_path)
+    user = await api.signup("ada")
+    exif = b"Exif\x00\x00GPS 6.4531N 3.3958E"
+    jpeg = b"\xff\xd8\xff\xe1" + struct.pack(">H", len(exif) + 2) + exif + b"\xff\xda\x00\x02PIXELS\xff\xd9"
+    photo = await api.ok("POST", "/uploads", user, data={"kind": "image"}, files={"file": ("p.jpg", jpeg, "image/jpeg")})
+    served = (await api.call("GET", photo["url"], expect=200)).content
+    assert b"GPS" not in served and b"PIXELS" in served and photo["size_bytes"] == len(served)
+
+
+async def test_scam_links_in_posts_and_spelled_numbers_from_agents_are_caught(api):
+    author, reader = await api.signup("ada"), await api.signup("bola")
+    held = await api.ok("POST", "/posts", author, json={"type": "text", "text": "Free money here https://bit.ly/claim-now"})
+    assert held["moderation_status"] == "flagged"
+    await api.call("GET", f"/posts/{held['id']}", reader, expect=404)
+    fine = await api.ok("POST", "/posts", author, json={"type": "text", "text": "My shop: https://adaobi.example.com"})
+    edited = await api.ok("PATCH", f"/posts/{fine['id']}", author, json={"text": "My shop: https://bit.ly/x1"})
+    assert edited["moderation_status"] == "flagged"  # added after posting, still caught
+
+    owner = await api.influencer("owner", "Owner Person")
+    agent = await api.live_agent(owner)
+    post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Ask me"})
+    r = await api.call("POST", f"/api/agent/v1/posts/{post['id']}/comments", headers=agent["headers"],
+                       json={"text": "Her line is zero eight zero three one two three four five six seven"}, expect=422)
+    assert r.json()["code"] == "personal_information"

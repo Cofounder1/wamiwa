@@ -1,4 +1,5 @@
 """Epic 2: posts, system-set labels, feeds, comments, agent tags, analytics and daily post ideas."""
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -14,7 +15,10 @@ from app.models import (
     Account, AgentIntegration, AgentProfile, AgentTag, Comment, CommentRating, CompanyProfile, ContentEdit, Contract,
     Follow, GeneratedVideo, Post, PostIdea, PostLike, UserProfile,
 )
+from app.infra.providers.base import ModerationResult
 from app.services.base import BaseService, Principal
+
+LINK = re.compile(r"https?://[^\s<>()\"']+", re.I)
 
 FREE_TAG_UNAVAILABLE = ("I am currently not available for free tag, you can check me out in the marketplace "
                         "to see how I can help you with this and more")
@@ -72,6 +76,17 @@ class PostService(BaseService):
             data["liked"] = liked
         return data
 
+    async def review_text(self, text: str) -> ModerationResult:
+        """Moderation plus a scam check of every link in the text (posts and comments, new or edited). A
+        suspicious link holds the content for review, as WA-11 does for Wamiwa Agent links."""
+        moderation = await self.providers.moderation.moderate_text(text)
+        if moderation.flagged:
+            return moderation
+        for url in list(dict.fromkeys(LINK.findall(text or "")))[:10]:
+            if (await self.providers.link_safety.check(url.rstrip(".,!?;:"))).suspicious:
+                return ModerationResult(True, moderation.vulgar, ("scam_link",), f"Suspected scam link: {url}")
+        return moderation
+
     async def _niche_of(self, account: Account) -> str | None:
         if account.is_company:
             company = await self.svc.access.company(account.id)
@@ -106,7 +121,7 @@ class PostService(BaseService):
                 ai_generated, mislabeled = True, True  # API-01: unlabeled AI content gets labeled when detected
 
         label, badge = LabelPolicy.for_post(author, ai_generated=ai_generated, likeness=bool(likeness_contract_id))
-        moderation = await self.providers.moderation.moderate_text(text) if text else None
+        moderation = await self.svc.posts.review_text(text) if text else None
         tagged: list[str] = []
         if tagged_handles:
             handles = [h.lstrip("@").lower() for h in tagged_handles][:10]
@@ -242,7 +257,7 @@ class PostService(BaseService):
         await self.repo(ContentEdit).add(ContentEdit(
             target_type="post", target_id=post.id, editor_id=account.id, previous_text=post.text))
         post.text, post.edited_at = text, self.now()
-        moderation = await self.providers.moderation.moderate_text(text) if text else None
+        moderation = await self.svc.posts.review_text(text) if text else None
         if moderation and moderation.flagged:
             post.moderation_status = ModerationStatus.FLAGGED
             await self.svc.queues.enqueue(Queue.REPORTS, "post", post.id, subject_account_id=account.id,
@@ -435,7 +450,7 @@ class CommentService(BaseService):
             on_behalf_of = None
 
         mentioned_agents = [] if label != Label.HUMAN else await self._mentioned_agents(text, post)
-        moderation = await self.providers.moderation.moderate_text(text)
+        moderation = await self.svc.posts.review_text(text)
         if moderation.flagged and principal.kind == "company_key":
             # API-02: a reply that fails moderation is blocked and the API returns the reason.
             raise Unprocessable("Reply blocked by moderation", code="moderation_blocked", reason=moderation.reason)
@@ -664,7 +679,7 @@ class CommentService(BaseService):
         await self.repo(ContentEdit).add(ContentEdit(
             target_type="comment", target_id=comment.id, editor_id=account.id, previous_text=comment.text))
         comment.text, comment.edited_at = text, self.now()
-        moderation = await self.providers.moderation.moderate_text(text)
+        moderation = await self.svc.posts.review_text(text)
         comment.flagged_vulgar, comment.moderation_reason = moderation.vulgar, moderation.reason
         if moderation.flagged:
             comment.moderation_status = ModerationStatus.FLAGGED

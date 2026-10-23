@@ -22,6 +22,7 @@ class HireMePage(Model):
     photos: Mapped[list] = mapped_column(JSON, default=list)
     videos: Mapped[list] = mapped_column(JSON, default=list)
     available: Mapped[bool] = mapped_column(Boolean, default=True, index=True)  # "Not available to work as human"
+    open_to_equity: Mapped[bool] = mapped_column(Boolean, default=False)  # HM-06: accepts cash + equity offers
     past_hires: Mapped[int] = mapped_column(Integer, default=0)
     rating_sum: Mapped[int] = mapped_column(Integer, default=0)
     rating_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -76,6 +77,9 @@ class Contract(Model):
     deadline_extended: Mapped[bool] = mapped_column(Boolean, default=False)
     exclusivity: Mapped[bool] = mapped_column(Boolean, default=False)
     no_ai_replies: Mapped[bool] = mapped_column(Boolean, default=False)
+    # HM-06: shares offered alongside the cash. Recorded only; Wamiwa doesn't hold, value or transfer them.
+    equity_terms: Mapped[dict | None] = mapped_column(JSON)
+    equity_acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     with_voice: Mapped[bool] = mapped_column(Boolean, default=False)
     influencer_must_post: Mapped[bool] = mapped_column(Boolean, default=False)
     takedown_days: Mapped[int | None] = mapped_column(Integer)

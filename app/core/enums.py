@@ -235,6 +235,7 @@ class PaymentPurpose(StrEnum):
     ARCON_FILING = "arcon_filing"
     PROMOTION = "promotion"
     AI_VIDEO_PLAN = "ai_video_plan"  # AV-02
+    EQUITY_FEE = "equity_fee"  # HM-06: $5 from each side on an equity-only deal
 
 
 class PaymentStatus(StrEnum):

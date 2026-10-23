@@ -51,6 +51,7 @@ class VideoPlanService(BaseService):
         if existing and existing.active and not existing.cancel_at_period_end:
             raise Conflict("You already have an active plan", code="plan_active")
         payment = await self.svc.payment.charge(company, PaymentPurpose.VIDEO_PLAN, price, payment_method)
+        payment_method = self.svc.payment.renewal_method(payment, payment_method)
         if existing is None:
             existing = await self.repo(BrandVideoPlan).add(BrandVideoPlan(
                 company_account_id=company.id, plan=plan, renews_at=self.now(), payment_method=payment_method))
@@ -455,7 +456,8 @@ class VideoGenerationService(BaseService):
                 plan.cancel_at_period_end = False
                 return self._present_plan(plan)
             raise Conflict("You already have the AI video plan", code="already_subscribed")
-        await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO_PLAN, self.s.ai_video_plan_cents, payment_method)
+        payment = await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO_PLAN, self.s.ai_video_plan_cents, payment_method)
+        payment_method = self.svc.payment.renewal_method(payment, payment_method)
         if plan is None:
             plan = await self.repo(CreatorVideoPlan).add(CreatorVideoPlan(
                 account_id=account.id, renews_at=self.now(), payment_method=payment_method))

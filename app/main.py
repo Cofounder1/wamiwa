@@ -118,7 +118,14 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
         if ping is not None and not await ping():
             checks["cache"] = "unavailable"
         healthy = all(value == "ok" for value in checks.values())
-        return JSONResponse({"status": "ok" if healthy else "degraded", **checks}, status_code=200 if healthy else 503)
+        # For information only: which outside services are real, stand-ins (development) or not connected yet.
+        def mode(provider) -> str:
+            name = type(provider).__name__
+            return "not_connected" if name.endswith("NotConnected") else "stand_in" if name.startswith("Sandbox") else "connected"
+        services = {"payments": mode(infra.providers.payments), "identity": mode(infra.providers.identity),
+                    "email": mode(infra.providers.email)}
+        return JSONResponse({"status": "ok" if healthy else "degraded", **checks, "services": services},
+                            status_code=200 if healthy else 503)
 
     return app
 

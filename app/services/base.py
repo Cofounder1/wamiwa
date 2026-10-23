@@ -12,7 +12,7 @@ from app.infra.cache import CacheService
 from app.infra.database import Database, UnitOfWork
 from app.infra.kv import KeyValueStore
 from app.infra.providers.base import (
-    EmailGateway, FxRateProvider, IdentityGateway, LinkSafetyGateway, ModerationGateway, MusicCatalogGateway, PaymentGateway, SmsGateway,
+    EmailGateway, FxRateProvider, IdentityGateway, LinkSafetyGateway, ModerationGateway, MusicCatalogGateway, PaymentGateway, PayPalCheckout, SmsGateway,
     SocialGateway, TrendGateway, VideoGateway, VoiceGateway, WatermarkGateway, WebhookTransport,
 )
 from app.infra.rate_limit import RateLimiter, RateLimitPolicies
@@ -42,6 +42,7 @@ class Providers:
     trends: TrendGateway
     music: MusicCatalogGateway
     link_safety: LinkSafetyGateway
+    paypal: PayPalCheckout  # creates PayPal orders; their charges go through `payments`
 
 
 @dataclass

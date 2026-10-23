@@ -64,6 +64,7 @@ JOBS: tuple[Job, ...] = (
     Job("popularity.queue_due_reviews", DAY, lambda s: s.popularity.queue_due_reviews()),
     Job("deletion.purge_due", DAY, lambda s: s.deletion.purge_due()),
     Job("uploads.purge_unused", DAY, lambda s: s.uploads.purge_unused()),
+    Job("equity.send_vesting_reminders", DAY, lambda s: s.equity.send_vesting_reminders()),
 )
 
 

@@ -38,14 +38,39 @@ def _assume_utc(value: datetime) -> datetime:
 Deadline = Annotated[datetime, AfterValidator(_assume_utc)]
 
 
+class EquityIn(BaseModel):
+    """HM-06: shares offered alongside the cash; give a percentage or a number of shares."""
+    percent: float | None = Field(default=None, gt=0, le=100)
+    shares: int | None = Field(default=None, gt=0)
+    share_class: str | None = Field(default=None, max_length=40)
+    vesting_months: int | None = Field(default=None, ge=0, le=120)
+    cliff_months: int | None = Field(default=None, ge=0, le=60)
+    agreement_ref: str = Field(min_length=1, max_length=255, description="The signed-ready agreement, uploaded as a document")
+    description: str | None = Field(default=None, max_length=1000)
+
+
+class AcceptIn(BaseModel):
+    equity_acknowledged: bool = False
+    payment_method: str | None = Field(default=None, max_length=64, description="Equity-only deals: the $5 service fee")
+
+
+class EquityCancelIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class EquityOptInIn(BaseModel):
+    open_to_equity: bool
+
+
 class OfferIn(BaseModel):
     influencer_id: str
-    price_cents: int = Field(gt=0)
+    price_cents: int = Field(ge=0, description="0 only for equity-only deals")
     deliverables: str = Field(min_length=3, max_length=5000)
     deadline: Deadline
     num_posts: int = Field(ge=1, le=1000)
     no_ai_replies: bool = False
     payment_method: str = PaymentMethod
+    equity: EquityIn | None = None
 
 
 class DeliverIn(BaseModel):
@@ -209,8 +234,21 @@ async def send_offer(body: OfferIn, p: Active, svc: Services):
 
 
 @router.post("/hire-me/contracts/{contract_id}/accept")
-async def accept_offer(contract_id: str, p: Active, svc: Services):
-    return ok(await svc.hire_me.accept(p.account, contract_id))
+async def accept_offer(contract_id: str, p: Active, svc: Services, body: AcceptIn | None = None):
+    return ok(await svc.hire_me.accept(p.account, contract_id, bool(body and body.equity_acknowledged),
+                                       body.payment_method if body else None))
+
+
+@router.post("/contracts/{contract_id}/equity/cancel")
+async def request_equity_cancellation(contract_id: str, body: EquityCancelIn, p: Active, svc: Services):
+    """HM-06: either side asks to end the equity agreement; Wamiwa approves or not."""
+    return ok(await svc.equity.request_cancellation(p.account, contract_id, body.reason))
+
+
+@router.put("/hire-me/equity")
+async def set_open_to_equity(body: EquityOptInIn, p: Active, svc: Services):
+    """HM-06: whether brands may offer equity alongside cash."""
+    return ok(await svc.hire_me.set_open_to_equity(p.account, body.open_to_equity))
 
 
 @router.post("/hire-me/contracts/{contract_id}/decline")

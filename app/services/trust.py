@@ -65,9 +65,15 @@ class ReportService(BaseService):
             target_account_id=target_account_id, reason=reason, details=details.strip(),
             weight=reporter.report_weight))
         if reason == ReportReason.RACISM_OR_ETHNIC_INSULT:
-            # RP-02: the content is hidden at once and the investigation team decides; the account is
-            # suspended only if they uphold the report.
-            await self._hide_pending_investigation(target_type, target_id)
+            # RP-02: the investigation team decides, and the account is suspended only if they uphold it. The
+            # content is hidden at once when the report is credible (an ID-verified reporter with no false reports)
+            # or a second person reports it, so one bad-faith report can't silence someone.
+            reporters = await self.repo(Report).count(
+                Report.target_type == target_type, Report.target_id == target_id,
+                Report.reason == ReportReason.RACISM_OR_ETHNIC_INSULT, Report.status == ReportStatus.OPEN)
+            credible = reporter.false_reports == 0 and await self.svc.access.is_id_verified(reporter)
+            if credible or reporters >= 2:
+                await self._hide_pending_investigation(target_type, target_id)
             await self.svc.queues.enqueue(
                 Queue.INVESTIGATIONS, "report", report.id, subject_account_id=target_account_id, severity="high",
                 summary=f"Racism or insulting Yoruba people: {details[:160]}")
@@ -91,6 +97,9 @@ class ReportService(BaseService):
 
     async def apply_review(self, item: QueueItem, approved: bool, admin: Account, reason: str, payload: dict) -> None:
         """Reports queue. `approve` upholds a report (or an appeal); for auto-flagged content it clears it."""
+        if item.target_type == "equity_cancellation":  # HM-06: a request to end an equity agreement
+            await self.svc.equity.apply_cancellation(item, approved, admin, reason, payload)
+            return
         if item.target_type in ("post", "comment"):  # auto-flagged by moderation
             await self._set_visibility(item.target_type, item.target_id, visible=approved)
             return

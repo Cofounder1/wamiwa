@@ -52,7 +52,7 @@ async def test_hire_me_happy_path_fees_and_payout(api):
     assert summary["sending"] == 1
     earnings = await api.ok("GET", "/earnings", influencer)
     assert earnings["paid"] == kobo(80_00) and earnings["cleared"] == 0
-    assert api.infra.providers.payments.transfers[0]["amount"] == kobo(80_00)
+    assert api.infra.providers.payments.main.transfers[0]["amount"] == kobo(80_00)
     # The next cycle is two weeks away.
     assert (await api.run("payouts.run_cycle"))["ran"] is False
 
@@ -68,7 +68,7 @@ async def test_hire_me_happy_path_fees_and_payout(api):
 
 async def test_hire_me_expiry_cancellation_and_auto_clear(api):
     _, brand, influencer = await hire_me_setup(api)
-    refunds = api.infra.providers.payments.refunds
+    refunds = api.infra.providers.payments.main.refunds
 
     # No response in 7 days: the offer expires and the brand is refunded in full.
     ignored = await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer))
@@ -240,7 +240,7 @@ async def test_likeness_script_review_changes_consent_video_and_term(api):
 
 async def test_likeness_term_end_misuse_and_rejected_offer_refund(api):
     admin, brand, influencer = await likeness_setup(api)
-    payments = api.infra.providers.payments
+    payments = api.infra.providers.payments.main
 
     # A rejected offer is refunded in full, production fee included.
     rejected = await api.ok("POST", "/likeness/contracts", brand, json=script_body(influencer))
@@ -469,3 +469,112 @@ async def test_offer_deadline_without_timezone_is_read_as_utc(api):
     offer = OfferIn(influencer_id="x", price_cents=100, deliverables="one post", deadline="2030-01-15", num_posts=1,
                     payment_method="tok_visa")
     assert offer.deadline.tzinfo is not None and offer.deadline.isoformat().startswith("2030-01-15T00:00:00")
+
+
+async def test_cash_plus_equity_offers(api, tmp_path):
+    """HM-06: equity alongside cash; Wamiwa records it but escrow, fees and disputes cover only the cash."""
+    from tests.test_growth import _minor
+
+    api.infra.settings.upload_dir = str(tmp_path)
+    _admin, brand, influencer = await hire_me_setup(api)  # starting price $50
+    agreement = (await api.ok("POST", "/uploads", brand, data={"kind": "document"},
+                              files={"file": ("equity.pdf", b"%PDF-1.7 agreement", "application/pdf")}))["ref"]
+    equity = {"percent": 0.5, "vesting_months": 12, "cliff_months": 3, "agreement_ref": agreement,
+              "description": "Advisor shares for the launch campaign"}
+
+    # Only creators who opted in get equity offers.
+    r = await api.call("POST", "/hire-me/offers", brand, json=offer(api, influencer, 25_00, equity=equity), expect=403)
+    assert r.json()["code"] == "equity_not_accepted"
+    await api.ok("PUT", "/hire-me/equity", influencer, json={"open_to_equity": True})
+
+    # Cash must still be at least half the starting price ($25 of $50); either a percentage or shares.
+    r = await api.call("POST", "/hire-me/offers", brand, json=offer(api, influencer, 20_00, equity=equity), expect=422)
+    assert r.json()["code"] == "equity_cash_too_low" and r.json()["minimum_cents"] == 25_00
+    r = await api.call("POST", "/hire-me/offers", brand, json=offer(api, influencer, 25_00, equity=equity | {"shares": 1000}), expect=422)
+    assert r.json()["code"] == "invalid_equity"
+    # Without equity, the usual starting price still applies.
+    await api.call("POST", "/hire-me/offers", brand, json=offer(api, influencer, 25_00), expect=422)
+
+    contract = await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer, 25_00, equity=equity))
+    assert contract["equity"]["percent"] == 0.5 and contract["equity"]["covered_by_escrow"] is False
+    assert "often worth nothing" in contract["equity"]["notice"] and contract["equity"]["company_registration_no"]
+    note = next(n for n in await api.ok("GET", "/notifications", influencer) if n["title"].startswith("New offer"))
+    assert "plus 0.5% equity, vesting over 12 months" in note["body"]
+
+    # The creator must confirm they understand before accepting.
+    cid = contract["id"]
+    r = await api.call("POST", f"/hire-me/contracts/{cid}/accept", influencer, json={}, expect=422)
+    assert r.json()["code"] == "equity_acknowledgement_required"
+    accepted = await api.ok("POST", f"/hire-me/contracts/{cid}/accept", influencer, json={"equity_acknowledged": True})
+    assert accepted["status"] == "active" and accepted["equity"]["acknowledged_at"]
+    escrow = (await api.ok("GET", f"/contracts/{cid}", brand))["escrow"]
+    assert escrow["amount"] == kobo(25_00)  # only the cash is in escrow
+    assert api.infra.providers.email.last_for(influencer.email)["subject"] == "Your equity deal is agreed"
+    # A year on, both the cliff and full-vesting reminders are due; each goes once to both sides.
+    api.clock.advance(days=370)
+    assert await api.run("equity.send_vesting_reminders") == 2
+    assert api.infra.providers.email.last_for(brand.email)["subject"] == "Equity reminder: all the shares have now vested"
+
+    # Under-18s can't opt in to equity.
+    minor = await _minor(api)
+    await api.ok("PUT", "/hire-me/page", minor, json={"starting_price_cents": 20_00})
+    r = await api.call("PUT", "/hire-me/equity", minor, json={"open_to_equity": True}, expect=403)
+
+
+async def test_equity_only_deals_fees_summary_reminders_and_cancellation(api, tmp_path):
+    api.infra.settings.upload_dir = str(tmp_path)
+    admin, brand, influencer = await hire_me_setup(api)
+    await api.ok("PUT", "/hire-me/equity", influencer, json={"open_to_equity": True})
+    agreement = (await api.ok("POST", "/uploads", brand, data={"kind": "document"},
+                              files={"file": ("equity.pdf", b"%PDF-1.7 agreement", "application/pdf")}))["ref"]
+    equity = {"shares": 10_000, "vesting_months": 12, "cliff_months": 3, "agreement_ref": agreement}
+    payments = api.infra.providers.payments.main
+
+    # Equity only, no cash: the brand pays a $5 service fee with the offer, refunded if it's declined.
+    before = set(payments.charges)
+    declined = await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer, 0, equity=equity))
+    assert [payments.charges[r][0] for r in set(payments.charges) - before] == [kobo(5_00)]
+    refunds_before = len(payments.refunds)
+    await api.ok("POST", f"/hire-me/contracts/{declined['id']}/decline", influencer)
+    assert [r["amount"] for r in payments.refunds[refunds_before:]] == [kobo(5_00)]
+
+    contract = await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer, 0, equity=equity))
+    cid = contract["id"]
+    assert contract["equity"]["equity_only"] and (await api.ok("GET", f"/contracts/{cid}", brand)).get("escrow") is None
+    # The creator pays their $5 on accepting.
+    r = await api.call("POST", f"/hire-me/contracts/{cid}/accept", influencer, json={"equity_acknowledged": True}, expect=402)
+    assert r.json()["price_cents"] == 5_00
+    before = set(payments.charges)
+    accepted = await api.ok("POST", f"/hire-me/contracts/{cid}/accept", influencer,
+                            json={"equity_acknowledged": True, "payment_method": PAY})
+    assert [payments.charges[r][0] for r in set(payments.charges) - before] == [kobo(5_00)]
+    assert accepted["equity"]["status"] == "active" and set(accepted["equity"]["vesting_dates"]) == {"cliff", "vested"}
+
+    # Both get an email summarising the deal.
+    email = api.infra.providers.email
+    for who in (brand, influencer):
+        summary = email.last_for(who.email)
+        assert summary["subject"] == "Your equity deal is agreed" and "10,000 ordinary shares" in summary["body"]
+        assert "vesting over 12 months with a 3-month cliff" in summary["body"]
+    # No cash, so nothing to dispute.
+    await api.ok("POST", f"/hire-me/contracts/{cid}/deliver", influencer, json={"delivery": "Posted"})
+    r = await api.call("POST", f"/contracts/{cid}/dispute", brand, json={"reason": "Not happy with it"}, expect=422)
+    assert r.json()["code"] == "no_cash_to_dispute"
+
+    # Reminders when shares vest: the cliff, then full vesting, once each.
+    api.clock.advance(days=60)
+    assert await api.run("equity.send_vesting_reminders") == 0
+    api.clock.advance(days=35)
+    assert await api.run("equity.send_vesting_reminders") == 1
+    assert email.last_for(brand.email)["subject"] == "Equity reminder: the first shares vest today"
+    assert await api.run("equity.send_vesting_reminders") == 0
+
+    # Either side can ask to cancel; Wamiwa decides. Once cancelled, reminders stop.
+    await api.ok("POST", f"/contracts/{cid}/equity/cancel", influencer, json={"reason": "The company closed down"})
+    assert email.last_for(brand.email)["subject"] == "The other side asked to cancel your equity agreement"
+    await api.decide(admin, "reports", cid, "approve", reason="Company dissolved; confirmed")
+    detail = await api.ok("GET", f"/contracts/{cid}", influencer)
+    assert detail["equity"]["status"] == "cancelled"
+    api.clock.advance(days=300)
+    assert await api.run("equity.send_vesting_reminders") == 0
+    await api.call("POST", f"/contracts/{cid}/equity/cancel", brand, json={"reason": "Again"}, expect=422)

@@ -15,6 +15,11 @@ class PayIn(BaseModel):
     payment_method: str = PaymentMethod
 
 
+class CheckoutIn(BaseModel):
+    amount_cents: int = Field(gt=0, le=10_000_000, description="The price in US cents")
+    description: str = Field(default="", max_length=127)
+
+
 class SubscribeIn(PayIn):
     period: BillingPeriod = BillingPeriod.MONTHLY
     tier: Literal["standard", "pro"] = "standard"
@@ -108,6 +113,27 @@ async def payouts(p: Active, svc: Services, cursor: str | None = None, limit: in
     return ok_page(await svc.payouts.list_for(p.id, cursor, limit))
 
 
+@router.get("/payments/method")
+async def payment_method(p: Active, svc: Services):
+    """PY-05: Flutterwave, in Naira in Nigeria and US dollars elsewhere; or PayPal, in dollars, once connected."""
+    return ok(await svc.payment.method(p.account))
+
+
+@router.post("/payments/checkout", status_code=201)
+async def start_checkout(body: CheckoutIn, p: Active, svc: Services):
+    """Step 1 of paying: what Flutterwave's checkout window needs. After paying, send `flw:<transaction id>` as the
+    payment_method to the endpoint that takes the payment; Wamiwa verifies it with Flutterwave."""
+    return ok(await svc.payment.start_checkout(p.account, body.amount_cents, body.description))
+
+
+@router.post("/payments/paypal/order", status_code=201)
+async def start_paypal_order(body: CheckoutIn, p: Active, svc: Services):
+    """Step 1 of paying with PayPal: an order for the payer to approve in PayPal's window. After approving, send
+    `paypal:<order id>` as the payment_method to the endpoint that takes the payment; Wamiwa captures it there.
+    Answers 503 `paypal_unavailable` until PayPal is connected."""
+    return ok(await svc.payment.start_paypal_order(p.account, body.amount_cents, body.description))
+
+
 @router.get("/payments")
 async def payment_history(p: Active, svc: Services, cursor: str | None = None, limit: int = 25):
     return ok_page(await svc.payment.history(p.account, cursor, limit))
@@ -127,6 +153,12 @@ async def subscription_status(p: Active, svc: Services):
 @router.post("/subscriptions", status_code=201)
 async def subscribe(body: SubscribeIn, p: Active, svc: Services):
     return ok(await svc.subscriptions.subscribe(p.account, body.period, body.payment_method, body.tier))
+
+
+@router.get("/subscriptions/upgrade-quote")
+async def subscription_upgrade_quote(p: Active, svc: Services):
+    """What moving up to Pro costs right now (the difference for the days left)."""
+    return ok(await svc.subscriptions.upgrade_quote(p.account))
 
 
 @router.patch("/subscriptions")

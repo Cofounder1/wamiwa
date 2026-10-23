@@ -8,7 +8,7 @@ from __future__ import annotations
 from functools import cached_property
 
 from app.services import (
-    accounts, admin, agents, auth, company, content, contracts, disputes, emails, growth, insights, likeness,
+    accounts, admin, agents, auth, company, content, contracts, disputes, emails, equity, growth, insights, likeness,
     messaging, money, notifications, payments, promos, queues, reminders, social, support, trust,
     uploads, verification, video,
 )
@@ -205,6 +205,10 @@ class ServiceRegistry:
         return likeness.GuardianConfirmationService(self._ctx)
 
     @cached_property
+    def guardian_calls(self) -> likeness.GuardianCallService:
+        return likeness.GuardianCallService(self._ctx)
+
+    @cached_property
     def video_plans(self) -> video.VideoPlanService:
         return video.VideoPlanService(self._ctx)
 
@@ -235,6 +239,10 @@ class ServiceRegistry:
     @cached_property
     def uploads(self) -> uploads.UploadService:
         return uploads.UploadService(self._ctx)
+
+    @cached_property
+    def equity(self) -> equity.EquityService:
+        return equity.EquityService(self._ctx)
 
     # --- companies, trust -----------------------------------------------------------------------------
     @cached_property
