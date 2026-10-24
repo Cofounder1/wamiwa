@@ -31,9 +31,11 @@ class SandboxIdentityGateway(IdentityGateway):
 
     PROTECTED_NAMES = {"burna boy", "davido", "wizkid", "tiwa savage", "beyonce"}
 
-    async def verify(self, document_type: str, document_ref: str, selfie_ref: str,
-                     liveness_ref: str | None = None) -> IdentityResult:
-        parts = [p.strip() for p in document_ref.split("|")]
+    async def verify(self, document_type: str, document_ref: str | None, selfie_ref: str | None,
+                     liveness_ref: str | None = None, *, id_number: str | None = None,
+                     liveness_session: str | None = None, in_home_country: bool = True) -> IdentityResult:
+        parts = [p.strip() for p in (id_number or document_ref or "").split("|")]
+        selfie_ref = selfie_ref or ""
         flags = {p.lower() for p in parts[2:]}
         if len(parts) < 2:
             return IdentityResult(False, False, failure_reason="Document could not be read")

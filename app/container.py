@@ -12,6 +12,8 @@ from app.infra.providers.base import SmsGateway, VoiceGateway
 from app.infra.providers.flutterwave import FlutterwaveGateway
 from app.infra.providers.payment_router import PaymentRouter
 from app.infra.providers.paypal import PayPalGateway
+from app.infra.providers.youverify import YouVerifyIdentityGateway
+from app.infra.storage import LocalFileStorage
 from app.infra.providers.unavailable import IdentityNotConnected, PaymentsNotConnected, PayPalNotConnected
 from app.infra.providers.sandbox import (
     HttpxWebhookTransport, SandboxEmailGateway, SandboxLinkSafetyGateway, SandboxMusicCatalogGateway, SandboxTrendGateway, SandboxIdentityGateway, SandboxModerationGateway,
@@ -61,8 +63,14 @@ def build_providers(settings: Settings) -> Providers:
     else:
         paypal = PayPalNotConnected()
     sms, voice = build_sms_and_voice(settings)
+    if settings.youverify_api_key and settings.youverify_public_merchant_key:
+        identity = YouVerifyIdentityGateway(
+            settings.youverify_api_key, settings.youverify_public_merchant_key, settings.youverify_environment,
+            storage=LocalFileStorage(settings.upload_dir), protected_names=set(settings.protected_identity_names))
+    else:
+        identity = SandboxIdentityGateway() if stand_ins_allowed else IdentityNotConnected()
     return Providers(
-        identity=SandboxIdentityGateway() if stand_ins_allowed else IdentityNotConnected(),
+        identity=identity,
         payments=PaymentRouter(payments, paypal),
         # The day's rate comes from Flutterwave once it is connected, so conversions match the money it moves.
         fx=payments if isinstance(payments, FlutterwaveGateway)

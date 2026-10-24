@@ -18,6 +18,8 @@ Refs = Field(default_factory=list, max_length=20)
 class QuoteIn(BaseModel):
     type: ContractType
     price_cents: int = Field(gt=0)
+    video_seconds: int = Field(default=0, ge=0, le=600, description="Likeness: the video length (0 = 60 seconds)")
+    use_plan: bool = Field(default=False, description="Likeness: a video plan covers the first 60 seconds")
 
 
 class HireMePageIn(BaseModel):
@@ -184,7 +186,7 @@ class AppealIn(BaseModel):
 # --- contracts: shared -----------------------------------------------------------------------------
 @router.post("/contracts/quote")
 async def quote(body: QuoteIn, p: Active, svc: Services):
-    return ok(await svc.contracts.quote(body.type, body.price_cents))
+    return ok(await svc.contracts.quote(body.type, body.price_cents, body.video_seconds, body.use_plan))
 
 
 @router.get("/contracts")

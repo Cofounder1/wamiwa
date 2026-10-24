@@ -18,13 +18,25 @@ class IdentityResult:
     date_of_birth: date | None = None
     face_ref: str | None = None
     failure_reason: str | None = None
+    # The automatic checks passed but a person must confirm the name and date of birth from the document
+    # (passports and IDs from outside Nigeria). `review_note` says what the checks found.
+    needs_review: bool = False
+    review_note: str | None = None
 
 
 class IdentityGateway(ABC):
     @abstractmethod
-    async def verify(self, document_type: str, document_ref: str, selfie_ref: str,
-                     liveness_ref: str | None = None) -> IdentityResult:
-        """`selfie_ref` is a frame from the live camera; `liveness_ref` the short clip of the head turns."""
+    async def verify(self, document_type: str, document_ref: str | None, selfie_ref: str | None,
+                     liveness_ref: str | None = None, *, id_number: str | None = None,
+                     liveness_session: str | None = None, in_home_country: bool = True) -> IdentityResult:
+        """`selfie_ref` is a frame from Wamiwa's own live camera check and `liveness_ref` its clip; or
+        `liveness_session` is the provider's own live check. `id_number` is looked up in the government
+        database where the provider can (Nigerian NIN and driver's licence); otherwise `document_ref` is a photo
+        of the document."""
+
+    async def start_liveness(self, account_id: str) -> dict | None:
+        """What the browser needs to run the provider's own live check, or None to use Wamiwa's camera check."""
+        return None
 
     @abstractmethod
     async def face_matches(self, face_ref: str, photo_ref: str) -> bool: ...

@@ -183,3 +183,48 @@ async def test_no_rate_ever_saved_refuses_clearly(api):
         async with api.services() as svc:
             await svc.fx.rate()
     assert refused.value.code == "fx_unavailable"
+
+
+async def test_a_likeness_hire_and_its_video_production_are_one_payment(api):
+    """LK-10: the checkout charges one exact amount, so the likeness price and the production fee are paid together
+    and refunded separately against that one payment."""
+    from tests.test_hiring import likeness_setup, script_body
+
+    api.infra.settings.flutterwave_public_key = "FLWPUBK_TEST-x"
+    api.infra.settings.flutterwave_secret_key = "FLWSECK_TEST-x"
+    fake = FakeFlutterwave()
+    api.infra.providers.payments = gateway(fake)
+    admin, brand, influencer = await likeness_setup(api)
+
+    # The quote says what to pay: $100 likeness + $45 production.
+    quote = await api.ok("POST", "/contracts/quote", brand, json={"type": "likeness", "price_cents": 100_00})
+    assert quote["production_usd_cents"] == 45_00 and quote["pay_now"] == {
+        "usd_cents": 145_00, "local": kobo(145_00), "currency": "NGN"}
+    checkout = await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": quote["pay_now"]["usd_cents"]})
+    paid = fake.pay(checkout["tx_ref"], checkout["amount"], "NGN")
+    contract = await api.ok("POST", "/likeness/contracts", brand, json=script_body(influencer) | {
+        "payment_method": f"flw:{paid}"})
+    assert contract["escrow"]["amount"] == kobo(100_00)
+    history = await api.ok("GET", "/payments", brand)
+    assert [(p["purpose"], p["amount_local"]) for p in history] == [("video_production", kobo(45_00))]
+
+    # A payment for only the likeness price isn't enough.
+    short = fake.pay((await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 100_00}))["tx_ref"],
+                     f"{kobo(100_00) / 100:.2f}", "NGN")
+    r = await api.call("POST", "/likeness/contracts", brand, json=script_body(influencer) | {
+        "payment_method": f"flw:{short}"}, expect=402)
+    assert "different amount" in r.json()["error"]
+
+    # Rejected: both parts go back, each refunded against the same Flutterwave payment.
+    await api.ok("POST", f"/likeness/contracts/{contract['id']}/reject", influencer, json={"reason": "Not for me"})
+    assert {(r["transaction"], r["amount"]) for r in fake.refunds} == {
+        (paid, f"{kobo(45_00) / 100:.2f}"), (paid, f"{kobo(100_00) / 100:.2f}")}
+
+    # With a video plan covering the video, only the likeness price is paid.
+    await api.ok("POST", "/video-plans", brand, json={"plan": "growth", "payment_method": f"flw:{fake.pay(
+        (await api.ok('POST', '/payments/checkout', brand, json={'amount_cents': 199_00}))['tx_ref'],
+        f'{kobo(199_00) / 100:.2f}', 'NGN')}"})
+    planned = fake.pay((await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 100_00}))["tx_ref"],
+                       f"{kobo(100_00) / 100:.2f}", "NGN")
+    await api.ok("POST", "/likeness/contracts", brand, json=script_body(influencer, use_plan=True) | {
+        "payment_method": f"flw:{planned}"})

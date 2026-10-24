@@ -48,8 +48,10 @@ class IdentityNotConnected(IdentityGateway):
     def _refuse(self):
         raise ServiceUnavailable(self.MESSAGE, code="identity_unavailable")
 
-    async def verify(self, document_type: str, document_ref: str, selfie_ref: str,
-                     liveness_ref: str | None = None) -> IdentityResult:
+    async def verify(self, *args, **kwargs) -> IdentityResult:
+        self._refuse()
+
+    async def start_liveness(self, account_id: str) -> dict | None:
         self._refuse()
 
     async def face_matches(self, face_ref: str, photo_ref: str) -> bool:

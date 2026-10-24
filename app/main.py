@@ -122,8 +122,10 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
         def mode(provider) -> str:
             name = type(provider).__name__
             return "not_connected" if name.endswith("NotConnected") else "stand_in" if name.startswith("Sandbox") else "connected"
-        services = {"payments": mode(infra.providers.payments), "identity": mode(infra.providers.identity),
-                    "email": mode(infra.providers.email)}
+        providers = infra.providers
+        services = {"payments": mode(getattr(providers.payments, "main", providers.payments)),
+                    "paypal": mode(providers.paypal), "identity": mode(providers.identity),
+                    "email": mode(providers.email), "sms": mode(providers.sms), "voice": mode(providers.voice)}
         return JSONResponse({"status": "ok" if healthy else "degraded", **checks, "services": services},
                             status_code=200 if healthy else 503)
 

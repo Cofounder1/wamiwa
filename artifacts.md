@@ -66,7 +66,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Flutterwave | Payments, escrow, payouts (Naira and US dollars) | Built and tested against a fake Flutterwave; needs its keys set (see .env.example) |
 | Exchange rate | The day's dollar to Naira rate | Taken from Flutterwave once its keys are set; a fixed test rate (1,500) until then |
 | PayPal | A second way to pay, in US dollars (payouts stay with Flutterwave) | Built and tested against a fake PayPal; off until Wamiwa's PayPal account and API keys are ready. Until then it refuses with "PayPal isn't available yet" |
-| YouVerify | ID and liveness checks | Not started |
+| YouVerify | ID and liveness checks | Built and tested against a fake YouVerify; sandbox keys set. Needs YouVerify to enable liveness results (Liveness History) on the account, and live keys for the site |
 | Africa's Talking | Phone codes and alerts by SMS, guardian confirmation calls | Built and tested against a fake Africa's Talking; needs its settings (see .env.example) and the voice callback URL set on Wamiwa's number |
 | Moderation and sentiment | Content checks, sentiment in five languages | Vendor not chosen |
 | Video watermarking | Tracing likeness videos | Vendor not chosen |

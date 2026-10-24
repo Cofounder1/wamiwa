@@ -62,9 +62,14 @@ class MarkReadIn(BaseModel):
 
 class IdentityIn(BaseModel):
     document_type: DocumentType
-    document_ref: str = Ref
-    selfie_ref: str = Ref
-    liveness_ref: str | None = Field(default=None, max_length=255, description="The live camera clip")
+    id_number: str | None = Field(default=None, max_length=32, description=(
+        "Nigerian NIN or driver's licence number, looked up with YouVerify. Not needed for a passport or an ID "
+        "from outside Nigeria, which is sent as document_ref instead"))
+    document_ref: str | None = Field(default=None, max_length=255, description="Photo of the passport or ID")
+    liveness_session_id: str | None = Field(default=None, max_length=128, description=(
+        "YouVerify's live check: the session_id from POST /verification/identity/live-check"))
+    selfie_ref: str | None = Field(default=None, max_length=255, description="Wamiwa's camera check: a live frame")
+    liveness_ref: str | None = Field(default=None, max_length=255, description="Wamiwa's camera check: the clip")
 
 
 class BankIn(BaseModel):
@@ -280,12 +285,21 @@ async def unblock(account_id: str, p: Active, svc: Services):
 
 
 # --- verification (ON-05 to ON-08) ---------------------------------------------------------------------------
+@router.post("/verification/identity/live-check")
+async def start_live_check(p: Active, svc: Services):
+    """ON-05 step 1. `provider: "youverify"`: run YouVerify's liveness SDK with the session_id, session_token and
+    public_merchant_key given, then send the session_id with the ID. `provider: "camera"`: use Wamiwa's own camera
+    check and send selfie_ref and liveness_ref."""
+    return ok(await svc.identity.start_live_check(p.account))
+
+
 @router.post("/verification/identity")
 async def submit_identity(body: IdentityIn, p: Active, svc: Services):
     await svc.uploads.claim(p.account, [body.document_ref], {"id_document"})
     await svc.uploads.claim(p.account, [body.selfie_ref, body.liveness_ref], {"liveness"})  # taken live, never a saved photo
     return ok(await svc.identity.submit(p.account, body.document_type, body.document_ref, body.selfie_ref,
-                                        body.liveness_ref))
+                                        body.liveness_ref, id_number=body.id_number,
+                                        liveness_session_id=body.liveness_session_id))
 
 
 @router.get("/verification/identity")

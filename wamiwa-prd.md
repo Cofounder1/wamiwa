@@ -115,8 +115,10 @@ As a user, I want to complete my profile with my niche and personal details.
 
 As an influencer, I want to verify my identity so I can earn on Wamiwa.
 
-- Accepted ID: National ID card, driver's licence, or international passport, plus a live check.
-- The live check uses the camera there and then: the person looks straight, turns left, then right, while a short clip records; a frame from it is matched to the ID photo. A saved photo can't be uploaded instead. If the browser can't open a camera, the person is asked to use their phone. The frame and clip are private: never shown back to anyone, like ID documents.
+- Accepted ID: National ID card (NIN), driver's licence, or international passport, plus a live check.
+- The live check is YouVerify's, run in the page with the camera there and then. Wamiwa asks YouVerify itself whether it passed; what the browser reports is never trusted. A saved photo can't be used instead. If the browser can't open a camera, the person is asked to use their phone. The live face is private: never shown back to anyone, like ID documents.
+- In Nigeria, with a NIN or driver's licence: the person types the number. It is looked up in the government database, and the photo there is matched to the live face. Given a match, the account is verified at once with the name and date of birth on the government record. The full number is never stored.
+- With a passport, or an ID from outside Nigeria: the person uploads a photo of the document, its photo is compared with the live face automatically, and staff confirm the name and date of birth from the document (Identity queue, 24 hours). The usual age and one-ID checks apply when they approve.
 - Required before Hire Me, Hire My Likeness, agent deployment, company payments, or any payout.
 - For minors, the guardian provides the ID.
 - Given verification fails, then I see the reason and can retry up to 3 times before manual review.
@@ -511,6 +513,7 @@ Video production is charged on top of the influencer's likeness price. Prices ar
 | Scale plan | $499 per month | 14 videos (about $36 each) |
 | ARCON filing service (optional) | ARCON's fee at cost + a flat handling fee (amount to set) | Wamiwa files the advert for ARCON approval on the brand's behalf |
 
+- The likeness price and the production charge are paid in one payment when the script is sent. Wamiwa holds the likeness part in escrow; if the offer ends before any video is made, both parts are refunded.
 - Unused plan videos roll over for one month, then expire.
 - Videos default to 60 seconds; longer videos use the extra-length price.
 - Plans renew monthly and can be cancelled any time; cancellation takes effect at the end of the paid month.
@@ -1427,7 +1430,7 @@ Each of these needs a provider chosen before build starts on the epics that use 
 
 | Need | Used in | Provider |
 | --- | --- | --- |
-| ID verification + liveness + face match | ON-05, LK-01, AV-01 | YouVerify |
+| ID verification + liveness + face match | ON-05, LK-01, AV-01 | YouVerify: NIN and driver's licence lookups, face comparison, and its liveness SDK. Passports and IDs from outside Nigeria are checked by staff after an automatic face comparison |
 | Payments, escrow and bank payouts (Naira and US dollars) | Epic 6 | Flutterwave (PY-05) |
 | Second way to pay (US dollars) | Epic 6 | PayPal (PY-05); not connected yet |
 | Day's US dollar to Naira rate | LK-02, LK-10, SB-01, PY-05 | Flutterwave's own rate, so conversions match the money it moves; the last rate is kept if it is unavailable |
@@ -1550,6 +1553,7 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 - [ ] To choose: converting uploaded videos so they play everywhere (iPhone .mov files often don't play in Chrome or on Android)
 - [ ] To choose: a service that detects street addresses and names, for AI-05 and chat summaries
 - [ ] To set up: Flutterwave account approval for international (dollar) collections and payouts, its webhook secret hash, and how dollar balances are reconciled
+- [ ] To set up: YouVerify must allow Wamiwa to read liveness results (Liveness History); it answers "Permission denied" today. Also ask whether document-capture results can be fetched or verified by Wamiwa's server, so passports could be read automatically
 - [ ] To set up: Wamiwa's PayPal business account and live API credentials, and how PayPal's dollar balance is reconciled and moved to Flutterwave for payouts
 - [ ] Lawyer to confirm: whether recording cash-plus-equity offers (HM-06) needs an SEC licence or a licensed partner, and the wording of the equity notice
 
@@ -1628,6 +1632,8 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 
 | Area | Before | Now |
 | --- | --- | --- |
+| Paying for a likeness hire (LK-10) | The likeness escrow and the production fee charged separately with the same payment, which a real Flutterwave or PayPal payment can't cover | One payment for both; the likeness part is held in escrow and the production part recorded separately; each refunded on its own |
+| Identity check (ON-05, section 19) | A document photo and Wamiwa's own camera check | YouVerify's live check for everyone. Nigerian NIN or driver's licence: verified at once from the government record. Passport or a foreign ID: automatic face comparison, then staff confirm the name and date of birth |
 | Exchange rate (section 19) | A fixed test rate; live source to choose | Flutterwave's rate, taken once a day. If Flutterwave can't give one, the last rate is used and admins are alerted once it is 2 days old |
 | Default artist links (WA-04, section 19) | Spotify, then YouTube Music, then Audiomack | Spotify, then YouTube Music, then Apple Music |
 | SMS and calls (LK-09, section 19) | Vendor to choose; the whole call recorded | Africa's Talking. The guardian enters the code, presses 1 or 2, then says their name and decision after a beep; that spoken confirmation is the recording |

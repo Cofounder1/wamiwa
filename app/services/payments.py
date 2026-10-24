@@ -78,6 +78,23 @@ class PaymentService(BaseService):
             raise PaymentRequired(result.failure_reason or "Payment failed", code="payment_failed")
         await self.ensure_unused(result.provider_ref)
         self.svc.money.undo_charge_if_rolled_back(result.provider_ref, amount_local, self.s.local_currency, reference)
+        return await self._record(account, purpose, amount_cents, amount_local, rate, result.provider_ref,
+                                  result.status == "succeeded", reference_id, result.reusable_method)
+
+    async def record_share(self, account: Account, purpose: PaymentPurpose, amount_cents: int, escrow: EscrowTransaction,
+                           reference_id: str | None = None) -> Payment:
+        """The part of an escrow payment that paid for something else (LK-10 video production with a likeness hire).
+        It shares the escrow's provider charge, so refunding it refunds just this part of that charge."""
+        contract = await self.repo(Contract).require(escrow.contract_id)
+        rate = Decimal(str(contract.fx_rate))
+        # Whatever the total converted to beyond the escrow's share, so the two always add up to the charge.
+        amount_local = convert_minor(contract.price_cents + amount_cents, rate) - escrow.amount
+        return await self._record(account, purpose, amount_cents, amount_local, rate, escrow.provider_ref,
+                                  escrow.risk_cleared, reference_id, None)
+
+    async def _record(self, account: Account, purpose: PaymentPurpose, amount_cents: int, amount_local: int, rate,
+                      provider_ref: str | None, succeeded: bool, reference_id: str | None,
+                      reusable_method: str | None) -> Payment:
         what = {"subscription": "your Wamiwa subscription", "ai_video": "an AI video", "video_production": "video production",
                 "video_plan": "your video plan", "extra_render": "an extra final render", "arcon_filing": "ARCON filing",
                 "promotion": "your Wamiwa Agent plan"}.get(str(purpose), str(purpose).replace("_", " "))
@@ -87,9 +104,9 @@ class PaymentService(BaseService):
             {"reference_id": reference_id} if reference_id else None)
         return await self.repo(Payment).add(Payment(
             account_id=account.id, purpose=purpose, amount_cents=amount_cents, amount_local=amount_local,
-            currency=self.s.local_currency, fx_rate=str(rate), provider_ref=result.provider_ref,
-            status=PaymentStatus.SUCCEEDED if result.status == "succeeded" else PaymentStatus.PENDING_RISK,
-            reference_id=reference_id, reusable_method=result.reusable_method))
+            currency=self.s.local_currency, fx_rate=str(rate), provider_ref=provider_ref,
+            status=PaymentStatus.SUCCEEDED if succeeded else PaymentStatus.PENDING_RISK,
+            reference_id=reference_id, reusable_method=reusable_method))
 
     def is_international(self, account: Account) -> bool:
         """PY-05: anyone whose country isn't Wamiwa's home country pays and is paid in dollars."""
@@ -203,17 +220,22 @@ class EscrowService(BaseService):
         escrow.state = to_state
         return escrow
 
-    async def fund(self, contract: Contract, hirer: Account, payment_method: str) -> EscrowTransaction:
-        """The hirer pays the full price when sending the offer; the day's FX rate is locked on the contract."""
+    async def fund(self, contract: Contract, hirer: Account, payment_method: str, *,
+                   also_charge_cents: int = 0) -> EscrowTransaction:
+        """The hirer pays the full price when sending the offer; the day's FX rate is locked on the contract.
+        `also_charge_cents` is charged in the same payment, since a checkout pays one exact amount; the escrow holds
+        only the contract's share and the rest is recorded by `PaymentService.record_share`."""
         await self.limiter.enforce(self.policies.payments, hirer.id)
-        amount = convert_minor(contract.price_cents, Decimal(str(contract.fx_rate)))
+        rate = Decimal(str(contract.fx_rate))
+        amount = convert_minor(contract.price_cents, rate)
+        total = convert_minor(contract.price_cents + also_charge_cents, rate)
         result = await self.providers.payments.charge(
-            reference=f"escrow_{contract.id}", amount=amount, currency=contract.currency,
-            payment_method=payment_method, customer_id=hirer.id, usd_cents=contract.price_cents)
+            reference=f"escrow_{contract.id}", amount=total, currency=contract.currency,
+            payment_method=payment_method, customer_id=hirer.id, usd_cents=contract.price_cents + also_charge_cents)
         if result.status == "failed":
             raise PaymentRequired(result.failure_reason or "Payment failed", code="payment_failed")
         await self.svc.payment.ensure_unused(result.provider_ref)
-        self.svc.money.undo_charge_if_rolled_back(result.provider_ref, amount, contract.currency, f"escrow_{contract.id}")
+        self.svc.money.undo_charge_if_rolled_back(result.provider_ref, total, contract.currency, f"escrow_{contract.id}")
         escrow = await self.repo(EscrowTransaction).add(EscrowTransaction(
             contract_id=contract.id, hirer_id=contract.hirer_id, earner_id=contract.earner_id, amount=amount,
             currency=contract.currency, fee_pct=contract.fee_pct, provider_ref=result.provider_ref,

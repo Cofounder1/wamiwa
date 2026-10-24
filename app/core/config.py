@@ -81,7 +81,14 @@ class Settings(BaseSettings):
     # --- third-party credentials (PRD section 19) ---
     # Not read yet: every provider still runs on its sandbox adapter. Each key is used once the
     # matching adapter is written and wired in app/container.py.
+    # YouVerify (ON-05): ID lookups, face matching and its live check. Off until the key and merchant key are set.
+    # Sandbox keys only work with youverify_environment="sandbox"; live keys need "live".
     youverify_api_key: str | None = None
+    youverify_public_merchant_key: str | None = None  # safe in the browser: it starts the live check
+    youverify_environment: str = "sandbox"  # sandbox | live
+    # LK-01: celebrity names only the person themselves may use for a likeness page or a promoted name
+    protected_identity_names: list[str] = Field(default_factory=lambda: [
+        "burna boy", "davido", "wizkid", "tiwa savage", "beyonce"])
     heygen_api_key: str | None = None
     # Africa's Talking: SMS codes and alerts, and the guardian confirmation call (ON-04, LK-09).
     # Username "sandbox" uses its sandbox, which reaches no real phone.

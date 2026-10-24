@@ -29,13 +29,21 @@ class ContractService(BaseService):
         return {ContractType.HIRE_ME: self.s.fee_pct_hire_me, ContractType.LIKENESS: self.s.fee_pct_likeness,
                 ContractType.AGENT: self.s.fee_pct_agent}[type]
 
-    async def quote(self, type: ContractType, price_cents: int) -> dict[str, Any]:
-        """PY-01: both sides see the price, fee and net amount before paying or accepting."""
+    async def quote(self, type: ContractType, price_cents: int, video_seconds: int = 0,
+                    use_plan: bool = False) -> dict[str, Any]:
+        """PY-01: both sides see the price, fee and net amount before paying or accepting. A likeness hire also
+        shows the video production fee (LK-10) and `pay_now`, the one amount the checkout charges for both."""
         usd = FeeBreakdown.of(price_cents, self.fee_pct(type))
         local_price, rate = await self.svc.fx.to_local(price_cents)
         local = FeeBreakdown.of(local_price, usd.fee_pct)
-        return {"usd_cents": usd.to_dict(), "local": {**local.to_dict(), "currency": self.s.local_currency},
-                "fx_rate": str(rate), "note": "The fee comes out of the price; nothing is added on top."}
+        quote = {"usd_cents": usd.to_dict(), "local": {**local.to_dict(), "currency": self.s.local_currency},
+                 "fx_rate": str(rate), "note": "The fee comes out of the price; nothing is added on top."}
+        if type == ContractType.LIKENESS:
+            production = self.svc.videos.production_charge_cents(video_seconds, use_plan)
+            quote["production_usd_cents"] = production
+            quote["pay_now"] = {"usd_cents": price_cents + production, "local": convert_minor(price_cents + production, rate),
+                                "currency": self.s.local_currency}
+        return quote
 
     def present(self, contract: Contract, escrow: EscrowTransaction | None = None) -> dict[str, Any]:
         usd = FeeBreakdown.of(contract.price_cents, contract.fee_pct)
@@ -105,9 +113,11 @@ class ContractService(BaseService):
         return Page(items=[self.present(c) for c in page.items], next_cursor=page.next_cursor)
 
     async def build(self, *, type: ContractType, hirer: Account, earner_id: str, price_cents: int,
-                    payment_method: str, equity_only: bool = False, **fields: Any) -> Contract:
+                    payment_method: str, equity_only: bool = False, also_charge_cents: int = 0,
+                    **fields: Any) -> Contract:
         """Create the contract with today's FX rate locked in, then fund escrow (hirer pays first).
-        An equity-only deal (HM-06) has no cash, so no escrow."""
+        An equity-only deal (HM-06) has no cash, so no escrow. `also_charge_cents` is taken in the same payment
+        (LK-10 video production with a likeness hire): one checkout covers both."""
         if price_cents <= 0 and not (equity_only and price_cents == 0):
             raise Unprocessable("Price must be above zero", code="invalid_price")
         await self.limiter.enforce(self.policies.offers, hirer.id)
@@ -118,7 +128,7 @@ class ContractService(BaseService):
             hirer_category=company.category if company else None,
             offer_expires_at=self.now() + timedelta(days=self.s.offer_expiry_days), **fields))
         if contract.price_cents:
-            await self.svc.escrow.fund(contract, hirer, payment_method)
+            await self.svc.escrow.fund(contract, hirer, payment_method, also_charge_cents=also_charge_cents)
         return contract
 
     async def activate(self, contract: Contract, actor_id: str | None) -> Contract:

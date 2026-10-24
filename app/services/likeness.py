@@ -351,12 +351,14 @@ class LikenessContractService(BaseService):
         if exclusivity:
             # The exclusivity price is quoted against image-only; keep its premium when voice is added.
             price += page.exclusivity_price_cents - page.price_image_cents
+        # One payment covers the likeness price and the video production (LK-10): a checkout pays one exact amount.
         contract = await self.svc.contracts.build(
             type=ContractType.LIKENESS, hirer=brand, earner_id=account.id, price_cents=price,
             payment_method=payment_method, title=f"Likeness hire by {company.business_name}", with_voice=with_voice,
             exclusivity=exclusivity, influencer_must_post=influencer_must_post, takedown_days=takedown_days,
-            no_ai_replies=no_ai_replies, requires_guardian=profile.is_minor)
-        await self.svc.videos.open_production(contract, brand, video_seconds, use_plan, payment_method)
+            no_ai_replies=no_ai_replies, requires_guardian=profile.is_minor,
+            also_charge_cents=self.svc.videos.production_charge_cents(video_seconds, use_plan))
+        await self.svc.videos.open_production(contract, brand, video_seconds, use_plan)
         await self._add_script(contract, script, always_review=profile.is_minor)
         return await self.detail(brand, contract.id)
 

@@ -142,6 +142,7 @@ class RateLimitPolicies:
         self.guardian_invites = RateLimitPolicy("guardian_invites", 5, DAY)
         self.friend_invites = RateLimitPolicy("friend_invites", 50, DAY)
         self.id_verification = RateLimitPolicy("id_verification", 5, DAY)
+        self.live_checks = RateLimitPolicy("live_checks", 10, DAY)  # each YouVerify live check is billed
         self.offers = RateLimitPolicy("offers", 30, HOUR)
         self.video_generation = RateLimitPolicy("video_generation", 20, HOUR)
         self.payments = RateLimitPolicy("payments", 20, HOUR)
