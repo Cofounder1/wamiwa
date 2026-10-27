@@ -212,6 +212,7 @@ class PostService(BaseService):
             liked = await self.repo(PostLike).exists(PostLike.post_id == post.id, PostLike.account_id == viewer.id)
             await self.svc.feed.record_impressions([post.id], viewer)
         data = self.present(post, author, liked)
+        await self.for_viewer(viewer, [data])
         await self.svc.promos.decorate(viewer, [data], "post")
         return data
 

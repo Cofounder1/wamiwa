@@ -279,6 +279,11 @@ class SubscriptionService(BaseService):
             if subscription.tier != tier:
                 return await self.change_tier(account, tier, payment_method)
             raise Conflict("You are already subscribed", code="already_subscribed")
+        if subscription and subscription.renews_at > self.now() and subscription.tier != tier:
+            # Cancelled but still paid for: renewing into another tier would hand over the new tier for the days
+            # already paid at the old price. Renew the same plan, then change it (the upgrade charges the difference).
+            raise Conflict("Renew your current plan first, then change it", code="renew_same_tier_first",
+                           tier=subscription.tier)
         price, days = self._terms(period, tier)
         payment = await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, price, payment_method)
         payment_method = self.svc.payment.renewal_method(payment, payment_method)

@@ -119,6 +119,8 @@ class AccountService(BaseService):
         data: dict[str, Any] = {
             "id": account.id, "type": account.type, "handle": account.handle, "email": account.email,
             "status": account.status, "phone": account.phone, "phone_verified": bool(account.phone_verified_at),
+            # Why a suspended or frozen account is on hold, for the banner that explains it and the appeal.
+            "status_reason": account.suspended_reason if account.status in ("suspended", "frozen") else None,
             "two_factor_enabled": account.totp_enabled, "feed_preference": account.feed_preference,
             "region": account.region, "admin_role": account.admin_role,
             "sponsored_cards": not account.promo_opt_out,
