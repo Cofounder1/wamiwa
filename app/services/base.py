@@ -21,6 +21,7 @@ from app.models.base import Model
 from app.repositories.base import Repository
 
 if TYPE_CHECKING:
+    from app.infra.launch import LaunchState
     from app.services.registry import ServiceRegistry
 
 M = TypeVar("M", bound=Model)
@@ -53,6 +54,7 @@ class Infrastructure:
     clock: Clock
     db: Database
     kv: KeyValueStore
+    launch: "LaunchState"
     cache: CacheService
     limiter: RateLimiter
     policies: RateLimitPolicies

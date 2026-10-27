@@ -115,15 +115,32 @@ class PaymentService(BaseService):
     def currency_for(self, account: Account) -> str:
         return "USD" if self.is_international(account) else self.s.local_currency
 
+    async def test_mode(self) -> bool:
+        """True until a Super Admin presses Go live on the live site; always true elsewhere (no real money)."""
+        return not (self.s.is_production and await self.infra.launch.is_live())
+
+    async def keys(self) -> dict[str, Any]:
+        """The keys in use now: on the live site the test keys before launch and the live ones after."""
+        s, test = self.s, await self.test_mode()
+        if s.is_production and test:
+            return {"flutterwave_secret": s.flutterwave_sandbox_secret_key, "flutterwave_public": s.flutterwave_sandbox_public_key,
+                    "paypal_id": s.paypal_sandbox_client_id, "paypal_secret": s.paypal_sandbox_secret,
+                    "paypal_environment": "sandbox", "test_mode": True}
+        return {"flutterwave_secret": s.flutterwave_secret_key, "flutterwave_public": s.flutterwave_public_key,
+                "paypal_id": s.paypal_client_id, "paypal_secret": s.paypal_secret,
+                "paypal_environment": s.paypal_environment, "test_mode": test}
+
     async def method(self, account: Account) -> dict[str, Any]:
         """How this person can pay: Flutterwave's checkout, in Naira at home and US dollars elsewhere, or PayPal,
-        always in dollars, once it is connected."""
-        connected = bool(self.s.flutterwave_secret_key and self.s.flutterwave_public_key)
-        paypal = bool(self.s.paypal_client_id and self.s.paypal_secret)
+        always in dollars, once it is connected. `test_mode`: no real money moves (show a test card)."""
+        k = await self.keys()
+        connected = bool(k["flutterwave_secret"] and k["flutterwave_public"])
+        paypal = bool(k["paypal_id"] and k["paypal_secret"])
         return {"provider": "flutterwave" if connected else "stand_in", "currency": self.currency_for(account),
-                "public_key": self.s.flutterwave_public_key if connected else None, "available": connected,
-                "paypal": {"available": paypal, "currency": "USD", "client_id": self.s.paypal_client_id if paypal else None,
-                           "environment": self.s.paypal_environment if paypal else None}}
+                "public_key": k["flutterwave_public"] if connected else None, "available": connected,
+                "test_mode": k["test_mode"],
+                "paypal": {"available": paypal, "currency": "USD", "client_id": k["paypal_id"] if paypal else None,
+                           "environment": k["paypal_environment"] if paypal else None}}
 
     async def start_checkout(self, account: Account, amount_cents: int, description: str) -> dict[str, Any]:
         """What the checkout window needs. The reference carries the account id, and the amount is checked again
@@ -132,7 +149,8 @@ class PaymentService(BaseService):
         currency = self.currency_for(account)
         amount = amount_cents if currency == "USD" else (await self.svc.fx.to_local(amount_cents))[0]
         return {"tx_ref": f"{reference_prefix(account.id)}{new_id()}", "amount": f"{amount / 100:.2f}",
-                "currency": currency, "public_key": self.s.flutterwave_public_key, "description": description[:100],
+                "currency": currency, "public_key": (await self.keys())["flutterwave_public"],
+                "description": description[:100],
                 "customer": {"email": account.email, "name": account.display_name}}
 
     async def start_paypal_order(self, account: Account, amount_cents: int, description: str) -> dict[str, Any]:

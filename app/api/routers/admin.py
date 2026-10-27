@@ -296,3 +296,22 @@ async def dashboard_csv(p: Admin, svc: Services, start: datetime | None = None, 
     body = await svc.admin_analytics.export_csv(p.account, start=start, end=end, role=role, niche=niche, region=region)
     return PlainTextResponse(body, media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=wamiwa-dashboard.csv"})
+
+
+# --- going live: test payment keys until now, live ones from now on ----------------------------------------------
+class GoLiveIn(BaseModel):
+    totp_code: str = Field(min_length=6, max_length=8)
+    confirm: str = Field(max_length=16, description='Type "GO LIVE"')
+
+
+@router.get("/platform")
+async def platform(p: Admin, svc: Services):
+    svc.admin.require_super(p.account)
+    return ok({**await svc.launch.status(), "test_money_left": await svc.launch.test_money()})
+
+
+@router.post("/platform/go-live")
+async def go_live(body: GoLiveIn, p: Admin, svc: Services):
+    """Switch payments to the live keys for good. Super Admin, fresh two-factor code, and "GO LIVE" typed out.
+    Refused while any test payment is still recorded (run the reset first)."""
+    return ok(await svc.launch.go_live(p.account, body.totp_code, body.confirm))

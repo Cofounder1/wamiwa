@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.api.errors import REQUEST_ID_HEADER, RequestContextMiddleware, register_error_handlers
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.routers import ROUTERS
+from app.infra.launch import LaunchSwitch
 from app.container import build_infrastructure
 from app.core.config import Settings, get_settings
 from app.jobs.runner import JobRunner
@@ -123,9 +124,15 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
             name = type(provider).__name__
             return "not_connected" if name.endswith("NotConnected") else "stand_in" if name.startswith("Sandbox") else "connected"
         providers = infra.providers
-        services = {"payments": mode(getattr(providers.payments, "main", providers.payments)),
-                    "paypal": mode(providers.paypal), "identity": mode(providers.identity),
-                    "email": mode(providers.email), "sms": mode(providers.sms), "voice": mode(providers.voice)}
+
+        async def current(provider):  # on the live site, the test or live provider behind the launch switch
+            return await provider.current() if isinstance(provider, LaunchSwitch) else provider
+
+        payments, paypal = await current(providers.payments), await current(providers.paypal)
+        services = {"payments": mode(getattr(payments, "main", payments)), "paypal": mode(paypal),
+                    "payments_mode": "live" if infra.settings.is_production and await infra.launch.is_live() else "test",
+                    "identity": mode(providers.identity), "email": mode(providers.email), "sms": mode(providers.sms),
+                    "voice": mode(providers.voice)}
         return JSONResponse({"status": "ok" if healthy else "degraded", **checks, "services": services},
                             status_code=200 if healthy else 503)
 

@@ -144,3 +144,17 @@ async def test_paying_with_paypal_beside_flutterwave(api):
                                                          "payment_method": pro["payment_method"]})
     run = await api.run("reconciliation.run")
     assert run.matched
+
+
+def test_test_keys_are_used_outside_production_and_never_on_the_live_site():
+    from app.core.config import Settings
+
+    keys = dict(flutterwave_secret_key="FLWSECK-live", flutterwave_sandbox_secret_key="FLWSECK_TEST-x",
+                paypal_client_id="live-id", paypal_secret="live-secret", paypal_environment="live",
+                paypal_sandbox_client_id="sb-id", paypal_sandbox_secret="sb-secret")
+    local = Settings(_env_file=None, env="development", **keys)
+    assert local.flutterwave_secret_key == "FLWSECK_TEST-x"
+    assert (local.paypal_client_id, local.paypal_secret, local.paypal_environment) == ("sb-id", "sb-secret", "sandbox")
+    live = Settings(_env_file=None, env="production", **keys)
+    assert live.flutterwave_secret_key == "FLWSECK-live"
+    assert (live.paypal_client_id, live.paypal_environment) == ("live-id", "live")

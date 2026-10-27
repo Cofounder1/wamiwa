@@ -114,6 +114,7 @@ Anything not connected runs on a built-in stand-in, so the whole app works for d
 ## Open items
 
 - Point `api.wamiwa.site` at the API (Render custom domain plus a Namecheap CNAME), then set the frontend's `VITE_API_URL` to it.
+- Launch day: (1) clear the test data from a laptop with `python -m app.cli reset-test-data --database-url <live database>` (shows what goes; add `--confirm wamiwa.site` to delete); (2) a Super Admin presses Go live in the admin panel, which switches payments from the test keys to the live keys for good. Both key sets must be on Render.
 - Move the API off Render's free plan before real users: it sleeps after 15 idle minutes, and scheduled jobs stop while it sleeps.
 - Move uploads off the server's disk (Render wipes it on each deploy).
 - Stop the local dev server using Supabase directly; point local `.env` at a local database.

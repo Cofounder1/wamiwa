@@ -106,6 +106,12 @@ class AppealIn(BaseModel):
 
 
 # --- profile and settings ---------------------------------------------------------------------
+@router.get("/platform/status", dependencies=[Anonymous])
+async def platform_status(svc: Services):
+    """Public. `test_mode`: payments use test keys and no real money moves; the site shows a banner."""
+    return ok(await svc.launch.status())
+
+
 @router.get("/regions", dependencies=[Anonymous])
 async def list_regions():
     """Every country and territory that can be chosen as a region or target region."""

@@ -8,7 +8,7 @@ from __future__ import annotations
 from functools import cached_property
 
 from app.services import (
-    accounts, admin, agents, auth, company, content, contracts, disputes, emails, equity, growth, insights, likeness,
+    accounts, admin, agents, auth, company, content, contracts, disputes, emails, equity, growth, insights, launch, likeness,
     messaging, money, notifications, payments, promos, queues, reminders, social, support, trust,
     uploads, verification, video,
 )
@@ -39,6 +39,10 @@ class ServiceRegistry:
     @cached_property
     def admin(self) -> admin.AdminService:
         return admin.AdminService(self._ctx)
+
+    @cached_property
+    def launch(self) -> launch.LaunchService:
+        return launch.LaunchService(self._ctx)
 
     @cached_property
     def admin_analytics(self) -> admin.AdminAnalyticsService:

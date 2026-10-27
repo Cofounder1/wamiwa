@@ -1496,6 +1496,7 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 
 - Every link in a post or comment (new or edited) is checked for scams; a suspicious one holds the content for review, as WA-11 does for Wamiwa Agent links. Company API replies with one are refused.
 - On the live site, payments and ID checks refuse with a clear message until the real providers are connected; the stand-ins, which approve everything, are only for development and tests.
+- Test mode before launch: the live site first runs on the payment providers' test keys, so testers can use it without real money, and every page shows a "Test mode" banner. Before launch, the test data is cleared with a command run by hand (admins, the Wamiwa Agent, the category maps and the audit log are kept). Then a Super Admin presses Go live (fresh two-factor code, "GO LIVE" typed out), which switches payments to the live keys for good. Go live is refused while any test payment is still recorded; after it, there is no way back to test mode and the reset can't run.
 
 ## 21. Out of scope and open decisions
 
@@ -1632,6 +1633,7 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 
 | Area | Before | Now |
 | --- | --- | --- |
+| Test mode and launch (section 20) | Live keys from the first deploy | Test keys and a "Test mode" banner until a Super Admin presses Go live; test data cleared by a command first; no way back afterwards |
 | Paying for a likeness hire (LK-10) | The likeness escrow and the production fee charged separately with the same payment, which a real Flutterwave or PayPal payment can't cover | One payment for both; the likeness part is held in escrow and the production part recorded separately; each refunded on its own |
 | Identity check (ON-05, section 19) | A document photo and Wamiwa's own camera check | YouVerify's live check for everyone. Nigerian NIN or driver's licence: verified at once from the government record. Passport or a foreign ID: automatic face comparison, then staff confirm the name and date of birth |
 | Exchange rate (section 19) | A fixed test rate; live source to choose | Flutterwave's rate, taken once a day. If Flutterwave can't give one, the last rate is used and admins are alerted once it is 2 days old |

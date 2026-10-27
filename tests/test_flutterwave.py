@@ -102,7 +102,7 @@ async def test_flutterwave_end_to_end_naira_dollars_renewals_and_payouts(api):
     # A Nigerian brand pays in Naira; the same payment can't be used twice.
     method = await api.ok("GET", "/payments/method", brand)
     assert method == {"provider": "flutterwave", "currency": "NGN", "public_key": "FLWPUBK_TEST-x", "available": True,
-                      "paypal": {"available": False, "currency": "USD", "client_id": None, "environment": None}}
+                      "test_mode": True, "paypal": {"available": False, "currency": "USD", "client_id": None, "environment": None}}
     checkout = await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 100_00, "description": "Offer"})
     assert checkout["currency"] == "NGN" and checkout["amount"] == "150000.00" and checkout["tx_ref"].startswith(f"wmw-{brand.id}-")
     paid = fake.pay(checkout["tx_ref"], checkout["amount"], "NGN")

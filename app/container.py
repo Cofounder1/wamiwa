@@ -5,6 +5,7 @@ from app.core.utils import Clock, set_default_clock
 from app.infra.cache import CacheService
 from app.infra.database import Database
 from app.infra.kv import InMemoryKeyValueStore, KeyValueStore, RedisKeyValueStore, ResilientKeyValueStore
+from app.infra.launch import LaunchState, LaunchSwitch
 from app.infra.providers.base import EmailGateway
 from app.infra.providers.resend import ResendEmailGateway
 from app.infra.providers.africastalking import AfricasTalkingSmsGateway, AfricasTalkingVoiceGateway
@@ -45,7 +46,23 @@ def build_sms_and_voice(settings: Settings) -> tuple[SmsGateway, VoiceGateway]:
     return sms, voice
 
 
-def build_providers(settings: Settings) -> Providers:
+def build_payments(settings: Settings, *, flutterwave_secret: str | None, paypal_client_id: str | None,
+                   paypal_secret: str | None, paypal_environment: str, stand_ins_allowed: bool):
+    """One set of payment providers: Flutterwave (or a stand-in), PayPal, and the day's rate."""
+    if flutterwave_secret:
+        main = FlutterwaveGateway(flutterwave_secret)
+    else:
+        main = SandboxPaymentGateway() if stand_ins_allowed else PaymentsNotConnected()
+    # PY-05: PayPal is a second way to pay, off until its credentials are set. It has no stand-in.
+    paypal = (PayPalGateway(paypal_client_id, paypal_secret, paypal_environment)
+              if paypal_client_id and paypal_secret else PayPalNotConnected())
+    # The day's rate comes from Flutterwave once it is connected, so conversions match the money it moves.
+    fx = main if isinstance(main, FlutterwaveGateway) else StaticFxRateProvider(
+        {("USD", settings.local_currency): settings.sandbox_fx_rate})
+    return PaymentRouter(main, paypal), paypal, fx
+
+
+def build_providers(settings: Settings, launch: LaunchState | None = None) -> Providers:
     """Sandbox adapters until the vendors in PRD section 19 are chosen and credentialed.
 
     To go live, implement the matching port in app/infra/providers/base.py (as FlutterwaveGateway does)
@@ -53,15 +70,26 @@ def build_providers(settings: Settings) -> Providers:
     """
     # On the live site a stand-in would approve every payment and ID check, so they refuse until connected.
     stand_ins_allowed = not settings.is_production or settings.allow_stand_in_providers
-    if settings.flutterwave_secret_key:
-        payments = FlutterwaveGateway(settings.flutterwave_secret_key)
-    else:
-        payments = SandboxPaymentGateway() if stand_ins_allowed else PaymentsNotConnected()
-    # PY-05: PayPal is a second way to pay, off until its credentials are set. It has no stand-in.
-    if settings.paypal_client_id and settings.paypal_secret:
-        paypal = PayPalGateway(settings.paypal_client_id, settings.paypal_secret, settings.paypal_environment)
-    else:
-        paypal = PayPalNotConnected()
+    if settings.is_production:
+        # Test keys until a Super Admin presses Go live, live keys after. The live set never uses a stand-in.
+        test = build_payments(settings, flutterwave_secret=settings.flutterwave_sandbox_secret_key,
+                              paypal_client_id=settings.paypal_sandbox_client_id,
+                              paypal_secret=settings.paypal_sandbox_secret, paypal_environment="sandbox",
+                              stand_ins_allowed=stand_ins_allowed)
+        live = build_payments(settings, flutterwave_secret=settings.flutterwave_secret_key,
+                              paypal_client_id=settings.paypal_client_id, paypal_secret=settings.paypal_secret,
+                              paypal_environment=settings.paypal_environment, stand_ins_allowed=False)
+
+        async def not_live() -> bool:
+            return False
+
+        is_live = launch.is_live if launch else not_live
+        payments, paypal, fx = (LaunchSwitch(t, l, is_live) for t, l in zip(test, live))
+    else:  # development and tests: the (test) keys in settings, whatever the launch state
+        payments, paypal, fx = build_payments(
+            settings, flutterwave_secret=settings.flutterwave_secret_key, paypal_client_id=settings.paypal_client_id,
+            paypal_secret=settings.paypal_secret, paypal_environment=settings.paypal_environment,
+            stand_ins_allowed=stand_ins_allowed)
     sms, voice = build_sms_and_voice(settings)
     if settings.youverify_api_key and settings.youverify_public_merchant_key:
         identity = YouVerifyIdentityGateway(
@@ -71,10 +99,8 @@ def build_providers(settings: Settings) -> Providers:
         identity = SandboxIdentityGateway() if stand_ins_allowed else IdentityNotConnected()
     return Providers(
         identity=identity,
-        payments=PaymentRouter(payments, paypal),
-        # The day's rate comes from Flutterwave once it is connected, so conversions match the money it moves.
-        fx=payments if isinstance(payments, FlutterwaveGateway)
-        else StaticFxRateProvider({("USD", settings.local_currency): settings.sandbox_fx_rate}),
+        payments=payments,
+        fx=fx,
         video=SandboxVideoGateway(),
         watermark=SandboxWatermarkGateway(),
         email=build_email(settings),
@@ -98,13 +124,16 @@ def build_infrastructure(settings: Settings, *, clock: Clock | None = None, kv: 
         kv = RedisKeyValueStore(settings.redis_url) if settings.redis_url else InMemoryKeyValueStore(clock)
     if not isinstance(kv, ResilientKeyValueStore):
         kv = ResilientKeyValueStore(kv)
+    db = Database(settings.database_url, echo=False, pool_size=settings.database_pool_size,
+                  max_overflow=settings.database_max_overflow, schema=settings.database_schema,
+                  query_timeout_seconds=settings.database_query_timeout_seconds)
+    launch = LaunchState(db, kv)
     return Infrastructure(
         settings=settings,
         clock=clock,
-        db=Database(settings.database_url, echo=False, pool_size=settings.database_pool_size,
-                    max_overflow=settings.database_max_overflow, schema=settings.database_schema,
-                    query_timeout_seconds=settings.database_query_timeout_seconds),
+        db=db,
         kv=kv,
+        launch=launch,
         cache=CacheService(kv),
         limiter=RateLimiter(kv, clock),
         policies=RateLimitPolicies(settings),
@@ -112,5 +141,5 @@ def build_infrastructure(settings: Settings, *, clock: Clock | None = None, kv: 
         passwords=PasswordHasher(),
         tokens=TokenService(settings, clock),
         totp=Totp(clock),
-        providers=providers or build_providers(settings),
+        providers=providers or build_providers(settings, launch),
     )

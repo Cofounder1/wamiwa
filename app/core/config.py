@@ -4,7 +4,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     paypal_secret: str | None = Field(default=None, validation_alias=AliasChoices(
         "WAMIWA_PAYPAL_SECRET", "WAMIWA_PAYPAL_API_SECRET_KEY", "paypal_secret"))
     paypal_environment: str = "sandbox"  # sandbox | live
+    # Test keys kept beside the live ones. Outside production they're always used, so a laptop never charges real
+    # money. On the live site they're used until a Super Admin presses Go live, and never after.
+    flutterwave_sandbox_secret_key: str | None = None
+    flutterwave_sandbox_public_key: str | None = None
+    paypal_sandbox_client_id: str | None = None
+    paypal_sandbox_secret: str | None = Field(default=None, validation_alias=AliasChoices(
+        "WAMIWA_PAYPAL_SANDBOX_SECRET", "WAMIWA_PAYPAL_SANDBOX_SECRET_KEY", "paypal_sandbox_secret"))
     home_region: str = "nigeria"  # people in this country pay and are paid in Naira; everyone else in US dollars
     # Browser apps allowed to call the API (the web frontend in development and on the site).
     # In the environment: a JSON list, or addresses separated by commas or spaces.
@@ -294,6 +301,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @model_validator(mode="after")
+    def _test_keys_outside_production(self) -> "Settings":
+        if self.is_production:
+            return self
+        if self.flutterwave_sandbox_secret_key:
+            self.flutterwave_secret_key = self.flutterwave_sandbox_secret_key
+            self.flutterwave_public_key = self.flutterwave_sandbox_public_key or self.flutterwave_public_key
+        if self.paypal_sandbox_client_id and self.paypal_sandbox_secret:
+            self.paypal_client_id, self.paypal_secret = self.paypal_sandbox_client_id, self.paypal_sandbox_secret
+            self.paypal_environment = "sandbox"
+        return self
 
 
 @lru_cache

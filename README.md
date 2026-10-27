@@ -160,6 +160,12 @@ SMS and the guardian confirmation call use Africa's Talking once `WAMIWA_AFRICAS
 `WAMIWA_AFRICASTALKING_API_KEY` are set (calls also need the voice number and callback token). During a call,
 Africa's Talking posts to `/webhooks/africastalking/voice?token=...` and Wamiwa answers each step with XML.
 
+**Test mode and launch.** On the live site, payments use the `..._SANDBOX_...` test keys and every page shows a
+"Test mode" banner until a Super Admin presses **Go live** (`/admin/go-live`); from then on the live keys, for good.
+Before that, clear the testers' data from a laptop:
+`python -m app.cli reset-test-data --database-url <live database>` lists what would go, and adding
+`--confirm wamiwa.site` deletes it. Go live is refused while test payments remain, and the reset refuses after launch.
+
 Services depend on the interfaces in `app/infra/providers/base.py`. Every other one is wired to a
 deterministic sandbox adapter (`sandbox.py`), which is what makes the whole flow testable offline. Going
 live with YouVerify, HeyGen and the still-unchosen watermark and moderation vendors means
