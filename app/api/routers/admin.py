@@ -200,7 +200,7 @@ async def claim_item(item_id: str, p: Admin, svc: Services):
     item = await svc.queues.claim(p.account, item_id)
     context = await svc.admin.account_detail(item.subject_account_id) if item.subject_account_id else None
     return ok({"id": item.id, "claimed_by": item.claimed_by, "target_type": item.target_type,
-               "target_id": item.target_id, "context": context})
+               "target_id": item.target_id, "context": context, "target": await svc.queues.target_detail(item)})
 
 
 @router.post("/queue-items/{item_id}/release")
@@ -260,8 +260,10 @@ async def set_category_map(body: CategoryMapIn, p: Admin, svc: Services):
 
 @router.get("/support/tickets")
 async def support_tickets(p: Admin, svc: Services, status: TicketStatus | None = None, cursor: str | None = None,
-                          limit: int = 50):
-    return ok_page(await svc.support.staff_list(status, cursor, limit))
+                          limit: int = 50, newest_first: bool = False, subject_prefix: str | None = None):
+    """Oldest first by default (the queue order); `newest_first` and `subject_prefix` serve the feedback page."""
+    return ok_page(await svc.support.staff_list(status, cursor, limit, newest_first=newest_first,
+                                                subject_prefix=subject_prefix))
 
 
 @router.get("/support/tickets/{ticket_id}")

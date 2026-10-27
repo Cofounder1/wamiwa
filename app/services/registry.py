@@ -161,6 +161,10 @@ class ServiceRegistry:
         return money.MoneyMovementService(self._ctx)
 
     @cached_property
+    def stray_payments(self) -> money.StrayPaymentService:
+        return money.StrayPaymentService(self._ctx)
+
+    @cached_property
     def fx(self) -> payments.FxService:
         return payments.FxService(self._ctx)
 

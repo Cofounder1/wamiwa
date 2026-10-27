@@ -2,7 +2,7 @@
 from typing import Any
 
 from app.core.enums import (
-    AccountStatus, AgentCommentPolicy, FeedTab, GuardianLinkStatus, NotificationType, Queue,
+    MANDATORY_NOTIFICATIONS, AccountStatus, AgentCommentPolicy, FeedTab, GuardianLinkStatus, NotificationType, Queue,
 )
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
 from app.core.security import SecretFactory
@@ -138,6 +138,10 @@ class AccountService(BaseService):
                 "popularity_level": profile.popularity_level,
                 "agent_comment_policy": profile.agent_comment_policy,
                 "read_receipts": profile.read_receipts, "typing_indicators": profile.typing_indicators,
+                # NT-01: the optional notification types and whether each is on; always-on ones can't be turned off.
+                "notification_prefs": {t: (profile.notification_prefs or {}).get(t, True) for t in sorted(
+                    {str(t) for t in NotificationType} - {str(t) for t in MANDATORY_NOTIFICATIONS})},
+                "daily_digest": profile.daily_digest,
             }
         if company:
             data["company"] = {

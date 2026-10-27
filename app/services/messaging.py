@@ -219,12 +219,18 @@ class MessagingService(BaseService):
             threaded = conversation.type in (ConversationType.ORDER, ConversationType.CONTRACT)
             if not threaded and any(m in hidden for m in members):
                 continue
+            last = await self.repo(Message).first(Message.conversation_id == conversation.id, order_by=Message.id.desc())
+            unread = await self.repo(Message).count(
+                Message.conversation_id == conversation.id, Message.sender_id != account.id,
+                *([Message.created_at > participant.last_read_at] if participant.last_read_at else []))
             items.append({
                 "id": conversation.id, "type": conversation.type, "contract_id": conversation.contract_id,
                 "accepted": participant.accepted,
                 "with": [{"id": m, "handle": accounts[m].handle, "name": accounts[m].display_name, "type": accounts[m].type}
                          for m in members if m in accounts],
                 "last_message_at": conversation.last_message_at.isoformat() if conversation.last_message_at else None,
+                "last_message": (last.body or "")[:140] if last else None,
+                "unread": unread,
             })
         return Page(items=items, next_cursor=page.next_cursor)
 
@@ -244,7 +250,14 @@ class MessagingService(BaseService):
                 ConversationParticipant.account_id != account.id):
             if await self.kv.get(f"typing:{conversation_id}:{other.account_id}"):
                 typing.append(other.account_id)
-        return {"conversation": {"id": conversation.id, "type": conversation.type, "accepted": participant.accepted},
+        others = await self.repo(ConversationParticipant).list(
+            ConversationParticipant.conversation_id == conversation_id, ConversationParticipant.account_id != account.id)
+        people = await self.repo(Account).by_ids([o.account_id for o in others])
+        return {"conversation": {
+                    "id": conversation.id, "type": conversation.type, "accepted": participant.accepted,
+                    "contract_id": conversation.contract_id,
+                    "with": [{"id": a.id, "handle": a.handle, "name": a.display_name, "type": a.type}
+                             for a in people.values()]},
                 "messages": [self.present_message(m) for m in page.items], "typing": typing, **page.meta()}
 
     async def set_typing(self, account: Account, conversation_id: str) -> None:
@@ -274,7 +287,12 @@ class MessagingService(BaseService):
         for conversation in (await self.db.execute(stmt)).scalars().all():
             messages = await self.repo(Message).list(Message.conversation_id == conversation.id,
                                                      order_by=Message.id.desc(), limit=200)
-            result.append({"conversation_id": conversation.id, "type": conversation.type,
+            others = await self.repo(ConversationParticipant).list(
+                ConversationParticipant.conversation_id == conversation.id, ConversationParticipant.account_id != minor_id)
+            people = await self.repo(Account).by_ids([o.account_id for o in others])
+            result.append({"conversation_id": conversation.id, "id": conversation.id, "type": conversation.type,
+                           "with": [{"id": a.id, "handle": a.handle, "name": a.display_name, "type": a.type}
+                                    for a in people.values()],
                            "messages": [self.present_message(m) for m in reversed(messages)]})
         return result
 

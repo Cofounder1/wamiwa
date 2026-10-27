@@ -1,4 +1,5 @@
 """PY-04 disputes and appeals, and Epic 8 subscriptions."""
+import math
 from datetime import timedelta
 from typing import Any
 
@@ -298,8 +299,9 @@ class SubscriptionService(BaseService):
         period = BillingPeriod(subscription.period)
         new_price, days = self._terms(period, "pro")
         old_price, _ = self._terms(period, "standard")
-        left = (subscription.renews_at - self.now()).total_seconds() / (days * 86400)
-        return max(1, round((new_price - old_price) * min(1.0, left)))
+        # Whole days left (today counts), so the quote and the charge a few minutes later agree to the cent.
+        days_left = math.ceil((subscription.renews_at - self.now()).total_seconds() / 86400)
+        return max(1, round((new_price - old_price) * min(1.0, days_left / days)))
 
     async def upgrade_quote(self, account: Account) -> dict[str, Any]:
         """What upgrading to Pro costs right now, so the checkout can be opened for exactly that amount."""

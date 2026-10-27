@@ -143,7 +143,10 @@ async def suggested_sellers(p: Active, svc: Services, category: str = Query(min_
 
 @router.get("/admin/promotions/keywords")
 async def category_keywords(p: Admin, svc: Services):
-    return ok(await svc.promos.keywords())
+    grouped: dict[str, list[str]] = {}  # the same shape the PUT takes and returns: category -> keywords
+    for keyword, category in (await svc.promos.keywords()).items():
+        grouped.setdefault(category, []).append(keyword)
+    return ok({category: sorted(words) for category, words in sorted(grouped.items())})
 
 
 @router.put("/admin/promotions/keywords")

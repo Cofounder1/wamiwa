@@ -225,6 +225,9 @@ class SearchService(BaseService):
         has_more = len(rows) > limit
         rows = rows[:limit]
         items = [present(*row) for row in rows]
+        if tab == "posts":
+            await self.svc.posts.for_viewer(viewer, items)
+            await self.svc.promos.decorate(viewer, items, "post")
         return Page(items=items, next_cursor=Cursor.encode(items[-1]["cursor_id"]) if has_more and items else None)
 
     @staticmethod
@@ -298,9 +301,7 @@ class SearchService(BaseService):
         if f.get("niche"):
             stmt = stmt.where(Post.niche == f["niche"].lower())
 
-        def present(post: Post, author: Account) -> dict:
-            return {"cursor_id": post.id, "id": post.id, "text": post.text[:280], "type": post.type,
-                    "label": post.label, "ai_badge": post.ai_badge,
-                    "author": {"id": author.id, "handle": author.handle}, "created_at": post.created_at.isoformat()}
+        def present(post: Post, author: Account) -> dict:  # the same shape as the feed, so it renders the same
+            return {"cursor_id": post.id, **self.svc.posts.present(post, author)}
 
         return stmt, Post.author_account_id, present

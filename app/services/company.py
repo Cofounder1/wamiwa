@@ -107,8 +107,8 @@ class CompanyService(BaseService):
         for field in ("allow_user_messages", "b2b_opt_out"):
             if changes.get(field) is not None:
                 setattr(company, field, bool(changes[field]))
-        if changes.get("region_targeting") is not None:
-            company.region_targeting = core_regions.require(changes["region_targeting"])
+        if changes.get("region_targeting") is not None:  # "" clears it
+            company.region_targeting = core_regions.require(changes["region_targeting"]) if changes["region_targeting"] else None
         if changes.get("bio") is not None:
             company.bio = changes["bio"]
         if changes.get("website") is not None:

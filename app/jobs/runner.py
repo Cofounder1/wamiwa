@@ -47,6 +47,7 @@ JOBS: tuple[Job, ...] = (
     Job("payouts.run_cycle", DAY, lambda s: s.payouts.run_cycle()),
     Job("payouts.finish_stuck", 10 * MINUTE, lambda s: s.payouts.finish_stuck()),
     Job("money.retry_due", 5 * MINUTE, lambda s: s.money.retry_due()),
+    Job("money.refund_unrecorded", 30 * MINUTE, lambda s: s.stray_payments.refund_unrecorded()),
     Job("reconciliation.run", DAY, lambda s: s.reconciliation.run()),
     # Subscriptions and daily content
     Job("subscriptions.process_renewals", HOUR, lambda s: s.subscriptions.process_renewals()),

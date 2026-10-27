@@ -1,4 +1,5 @@
 """Own account: profile, settings, guardians, notifications, blocks, verification and deletion."""
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Query
@@ -147,7 +148,10 @@ async def verify_phone(body: CodeIn, p: Active, svc: Services):
 # --- deletion, export, appeal (DL-01, AD-02) -----------------------------------------------------
 @router.get("/accounts/me/deletion")
 async def deletion_blockers(p: Any_, svc: Services):
-    return ok({"blockers": await svc.deletion.blockers(p.account), "status": p.account.status})
+    a = p.account
+    delete_on = (a.deletion_requested_at + timedelta(days=svc.deletion.s.deletion_grace_days)).isoformat() \
+        if a.status == "pending_deletion" and a.deletion_requested_at else None
+    return ok({"blockers": await svc.deletion.blockers(a), "status": a.status, "delete_on": delete_on})
 
 
 @router.post("/accounts/me/deletion")

@@ -154,6 +154,33 @@ class FlutterwaveGateway(PaymentGateway, FxRateProvider):
         data = self._data(response)
         return data.get("account_name") if data else None
 
+    # --- payments nothing was recorded for -------------------------------------------------------------
+    async def successful_transactions(self, since: str, until: str) -> list[dict]:
+        """Successful payments from `since` to `until` (YYYY-MM-DD): id, tx_ref, amount, currency, created_at."""
+        found, page = [], 1
+        while True:
+            data_response = await self._call("GET", f"/transactions?from={since}&to={until}&status=successful&page={page}")
+            try:
+                body = data_response.json()
+            except ValueError:
+                raise RuntimeError("Flutterwave transactions unavailable")
+            if body.get("status") != "success":
+                raise RuntimeError(f"Flutterwave transactions unavailable: {body.get('message')}")
+            found += [{"id": t.get("id"), "tx_ref": str(t.get("tx_ref") or ""), "amount": t.get("amount"),
+                       "currency": t.get("currency"), "created_at": t.get("created_at")} for t in body.get("data") or []]
+            info = (body.get("meta") or {}).get("page_info") or {}
+            if page >= int(info.get("total_pages") or 0) or page >= 50:
+                return found
+            page += 1
+
+    async def refund_in_full(self, transaction_id) -> TransferResult:
+        """Give back a whole payment, in the currency it was paid in."""
+        response = await self._call("POST", f"/transactions/{transaction_id}/refund", json={})
+        data = self._data(response)
+        if data is None:
+            return TransferResult(False, failure_reason=self._message(response))
+        return TransferResult(True, f"flwrefund:{data.get('id')}")
+
     # --- exchange rate --------------------------------------------------------------------------------
     async def rate(self, base: str, quote: str) -> Decimal:
         """Units of `quote` per one `base` (e.g. Naira per US dollar), at Flutterwave's own rate, so Wamiwa's

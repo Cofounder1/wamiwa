@@ -76,6 +76,28 @@ class PostService(BaseService):
             data["liked"] = liked
         return data
 
+    async def for_viewer(self, viewer: Account | None, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Per-viewer details on a list of presented posts: whether this person liked each one, and which brand a
+        sponsored (likeness) post is for. One query each, whatever the list's length."""
+        if not items:
+            return items
+        if viewer:
+            ids = [i["id"] for i in items]
+            liked = set((await self.db.execute(select(PostLike.post_id).where(
+                PostLike.post_id.in_(ids), PostLike.account_id == viewer.id))).scalars().all())
+            for item in items:
+                item["liked"] = item["id"] in liked
+        contract_ids = [i["sponsored_contract_id"] for i in items if i.get("sponsored_contract_id")]
+        if contract_ids:
+            contracts = await self.repo(Contract).by_ids(contract_ids)
+            brands = await self.repo(Account).by_ids([c.hirer_id for c in contracts.values()])
+            for item in items:
+                contract = contracts.get(item.get("sponsored_contract_id") or "")
+                brand = brands.get(contract.hirer_id) if contract else None
+                if brand:
+                    item["sponsored_by"] = {"id": brand.id, "handle": brand.handle, "name": brand.display_name}
+        return items
+
     async def review_text(self, text: str) -> ModerationResult:
         """Moderation plus a scam check of every link in the text (posts and comments, new or edited). A
         suspicious link holds the content for review, as WA-11 does for Wamiwa Agent links."""
@@ -200,7 +222,11 @@ class PostService(BaseService):
         if not viewer or viewer.id != author_id:
             where.append(Post.moderation_status == ModerationStatus.VISIBLE)
         page = await self.repo(Post).page(*where, cursor=cursor, limit=limit)
-        return Page(items=[self.present(p) for p in page.items], next_cursor=page.next_cursor)
+        author = await self.repo(Account).get(author_id)
+        items = await self.for_viewer(viewer, [self.present(p, author) for p in page.items])
+        if viewer:
+            await self.svc.promos.decorate(viewer, items, "post")
+        return Page(items=items, next_cursor=page.next_cursor)
 
     # --- FD-08 edit and delete -------------------------------------------------------------
     async def manages(self, account: Account, author_id: str) -> bool:
@@ -348,6 +374,7 @@ class FeedService(BaseService):
             raw = await self.cache.get_or_set(key, self.s.cache_ttl_feed, lambda: self._query(tab, cursor, limit, None))
         items = [dict(item) for item in raw["items"] if item["author_id"] not in hidden]
         await self.record_impressions([item["id"] for item in items], viewer)
+        await self.svc.posts.for_viewer(viewer, items)
         await self.svc.promos.decorate(viewer, items, "post")
         return Page(items=items, next_cursor=raw["next_cursor"]), tab
 

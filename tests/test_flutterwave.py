@@ -15,13 +15,15 @@ class FakeFlutterwave:
         self.token_charges: list[dict] = []
         self.references: set[str] = set()
         self.rate: float | None = 1534.25  # Naira per US dollar
+        self.now = lambda: __import__("datetime").datetime.now(__import__("datetime").UTC)
 
     def pay(self, tx_ref: str, amount: str, currency: str, email: str = "payer@example.com") -> int:
         """What happens in the checkout window: a successful card payment, with a token saved for renewals."""
         transaction_id = 1000 + len(self.transactions)
         self.transactions[transaction_id] = {
             "id": transaction_id, "tx_ref": tx_ref, "status": "successful", "amount": float(amount), "currency": currency,
-            "customer": {"email": email}, "card": {"token": f"flw-t1nf-{transaction_id}"}}
+            "customer": {"email": email}, "card": {"token": f"flw-t1nf-{transaction_id}"},
+            "created_at": self.now().isoformat()}
         return transaction_id
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -31,6 +33,10 @@ class FakeFlutterwave:
         def ok(data):
             return httpx.Response(200, json={"status": "success", "message": "ok", "data": data})
 
+        if path == "/transactions" and request.method == "GET":
+            return httpx.Response(200, json={"status": "success", "meta": {"page_info": {
+                "total": len(self.transactions), "current_page": 1, "total_pages": 1}},
+                "data": [t for t in self.transactions.values() if t["status"] == "successful"]})
         if path.endswith("/verify"):
             tx = self.transactions.get(int(path.split("/")[2]))
             return ok(tx) if tx else httpx.Response(404, json={"status": "error", "message": "No transaction"})
@@ -228,3 +234,31 @@ async def test_a_likeness_hire_and_its_video_production_are_one_payment(api):
                        f"{kobo(100_00) / 100:.2f}", "NGN")
     await api.ok("POST", "/likeness/contracts", brand, json=script_body(influencer, use_plan=True) | {
         "payment_method": f"flw:{planned}"})
+
+
+async def test_a_payment_that_paid_for_nothing_is_refunded_in_full(api):
+    """The person pays in Flutterwave's window first; if Wamiwa then refuses the request, or it never arrives, the
+    payment is found and refunded after 30 minutes. Payments that paid for something are left alone."""
+    api.infra.settings.flutterwave_public_key = "FLWPUBK_TEST-x"
+    api.infra.settings.flutterwave_secret_key = "FLWSECK_TEST-x"
+    fake = FakeFlutterwave()
+    fake.now = api.clock.now
+    api.infra.providers.payments = gateway(fake)
+    admin, brand, influencer = await hire_me_setup(api)
+
+    used = fake.pay((await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 100_00}))["tx_ref"],
+                    f"{kobo(100_00) / 100:.2f}", "NGN")
+    await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer) | {"payment_method": f"flw:{used}"})
+    # Paid, then refused: below the creator's starting price.
+    stray = fake.pay((await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 10_00}))["tx_ref"],
+                     f"{kobo(10_00) / 100:.2f}", "NGN")
+    await api.call("POST", "/hire-me/offers", brand, json=offer(api, influencer, 10_00) | {
+        "payment_method": f"flw:{stray}"}, expect=422)
+
+    assert await api.run("money.refund_unrecorded") == 0  # not yet: the checkout may still be on its way
+    api.clock.advance(minutes=31)
+    assert await api.run("money.refund_unrecorded") == 1
+    assert [r["transaction"] for r in fake.refunds] == [stray]
+    assert await api.run("money.refund_unrecorded") == 0  # never twice
+    notes = await api.ok("GET", "/notifications", brand)
+    assert any(n["title"] == "Payment refunded" for n in notes)

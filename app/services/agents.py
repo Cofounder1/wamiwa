@@ -28,7 +28,8 @@ _background_tasks: set[asyncio.Task] = set()
 
 
 class AgentService(BaseService):
-    def present(self, account: Account, agent: AgentProfile, owner: Account | None = None) -> dict[str, Any]:
+    def present(self, account: Account, agent: AgentProfile, owner: Account | None = None,
+                integration_status: str | None = None) -> dict[str, Any]:
         data = {
             "id": account.id, "handle": account.handle, "name": agent.name, "description": agent.description,
             "skills": agent.skills, "rates": agent.rates, "free_tag_daily_cap": agent.free_tag_daily_cap,
@@ -38,7 +39,16 @@ class AgentService(BaseService):
         }
         if owner:
             data["owner"] = {"id": owner.id, "handle": owner.handle, "name": owner.display_name}
+        if integration_status is not None:
+            # AG-04: orders are taken only while the agent is live: not paused, and its webhook test passed.
+            data["integration_status"] = integration_status
+            data["accepting_orders"] = (not agent.paused and account.status == AccountStatus.ACTIVE
+                                        and integration_status == IntegrationStatus.LIVE)
         return data
+
+    async def _integration_statuses(self, agent_ids: list[str]) -> dict[str, str]:
+        rows = await self.repo(AgentIntegration).list(AgentIntegration.agent_account_id.in_(agent_ids or [""]))
+        return {r.agent_account_id: r.status for r in rows}
 
     @staticmethod
     def _clean_rates(rates: dict[str, int]) -> dict[str, int]:
@@ -108,7 +118,9 @@ class AgentService(BaseService):
     async def list_mine(self, owner: Account) -> list[dict[str, Any]]:
         agents = await self.repo(AgentProfile).list(AgentProfile.owner_account_id == owner.id)
         accounts = await self.repo(Account).by_ids([a.account_id for a in agents])
-        return [self.present(accounts[a.account_id], a, owner) for a in agents
+        statuses = await self._integration_statuses([a.account_id for a in agents])
+        return [self.present(accounts[a.account_id], a, owner, statuses.get(a.account_id, IntegrationStatus.PENDING_TEST))
+                for a in agents
                 if a.account_id in accounts and accounts[a.account_id].status != AccountStatus.DELETED]
 
     async def set_paused(self, owner: Account, agent_id: str, paused: bool) -> dict[str, Any]:
@@ -183,7 +195,9 @@ class AgentService(BaseService):
             has_more = len(rows) > limit
             rows = rows[:limit]
             owners = await self.repo(Account).by_ids([agent.owner_account_id for _, agent in rows])
-            return {"items": [self.present(a, p, owners.get(p.owner_account_id)) for a, p in rows],
+            statuses = await self._integration_statuses([a.id for a, _ in rows])
+            return {"items": [self.present(a, p, owners.get(p.owner_account_id),
+                                           statuses.get(a.id, IntegrationStatus.PENDING_TEST)) for a, p in rows],
                     "next_cursor": Cursor.encode(rows[-1][0].id) if has_more and rows else None}
 
         return await self.cache.get_or_set(f"marketplace:{fingerprint}", self.s.cache_ttl_marketplace, load)
@@ -194,7 +208,9 @@ class AgentService(BaseService):
         if agent is None or account is None or account.status != AccountStatus.ACTIVE:
             raise NotFound("This agent is no longer available", code="agent_unavailable",
                            similar_agents_url=f"/marketplace/agents?similar_to={agent_id}")
-        return self.present(account, agent, await self.repo(Account).get(agent.owner_account_id))
+        statuses = await self._integration_statuses([agent_id])
+        return self.present(account, agent, await self.repo(Account).get(agent.owner_account_id),
+                            statuses.get(agent_id, IntegrationStatus.PENDING_TEST))
 
     # --- AG-05 auto-reply agent ---------------------------------------------------------------
     async def configure_auto_reply(self, account: Account, agent_id: str | None, enabled: bool) -> dict[str, Any]:
