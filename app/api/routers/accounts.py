@@ -2,7 +2,7 @@
 from datetime import timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import Active, Anonymous, Any_, Services, ok, ok_page
@@ -107,15 +107,19 @@ class AppealIn(BaseModel):
 
 
 # --- profile and settings ---------------------------------------------------------------------
-@router.get("/platform/status", dependencies=[Anonymous])
-async def platform_status(svc: Services):
+# These two are asked for on every page load and are cheap, unchanging data, so they don't count against the
+# per-address budget: many people share one address on mobile networks, and the site shouldn't break for them.
+@router.get("/platform/status")
+async def platform_status(svc: Services, response: Response):
     """Public. `test_mode`: payments use test keys and no real money moves; the site shows a banner."""
+    response.headers["Cache-Control"] = "public, max-age=60"
     return ok(await svc.launch.status())
 
 
-@router.get("/regions", dependencies=[Anonymous])
-async def list_regions():
+@router.get("/regions")
+async def list_regions(response: Response):
     """Every country and territory that can be chosen as a region or target region."""
+    response.headers["Cache-Control"] = "public, max-age=86400"
     return ok(regions.options())
 
 
