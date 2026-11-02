@@ -165,3 +165,14 @@ async def test_youverify_refusing_gives_a_clear_message(api):
     r = await api.call("POST", "/verification/identity", ada, expect=503, json={
         "document_type": "national_id", "id_number": "12345678901", "liveness_session_id": session})
     assert r.json()["code"] == "identity_unavailable"
+
+
+async def test_without_youverify_the_stand_in_accepts_a_real_id_number(api):
+    """For a closed test on the live site before YouVerify is connected: a real NIN passes, under the profile's
+    own name and date of birth."""
+    ada = await api.signup("ada", name="Ada Okafor")
+    r = await api.ok("POST", "/verification/identity", ada, json={
+        "document_type": "national_id", "id_number": "12345678901", "selfie_ref": "selfie-ada"})
+    assert r["status"] == "passed" and r["id_verified"]
+    me = await api.ok("GET", "/accounts/me", ada)
+    assert me["profile"]["verified_name"] == "Ada Okafor"

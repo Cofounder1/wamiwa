@@ -23,10 +23,12 @@ log = logging.getLogger("wamiwa.sandbox")
 
 
 class SandboxIdentityGateway(IdentityGateway):
-    """`document_ref` format: "<name>|<YYYY-MM-DD>[|fail|blurry|noliveness]".
+    """Approves ID checks without checking anything: for development, tests, and a closed test on the live site
+    (WAMIWA_ALLOW_STAND_IN_PROVIDERS) until the real provider is connected.
 
-    e.g. "Ada Obi|1995-04-02" passes; "Ada Obi|1995-04-02|blurry" fails with a reason.
-    A photo ref containing "nomatch" fails the face match.
+    A real ID number or document photo passes, keeping the name and date of birth from the person's profile.
+    Tests can instead give "<name>|<YYYY-MM-DD>[|fail|blurry|noliveness]" to set the verified details or force a
+    failure, e.g. "Ada Obi|1995-04-02|blurry". A photo ref containing "nomatch" fails the face match.
     """
 
     PROTECTED_NAMES = {"burna boy", "davido", "wizkid", "tiwa savage", "beyonce"}
@@ -34,11 +36,14 @@ class SandboxIdentityGateway(IdentityGateway):
     async def verify(self, document_type: str, document_ref: str | None, selfie_ref: str | None,
                      liveness_ref: str | None = None, *, id_number: str | None = None,
                      liveness_session: str | None = None, in_home_country: bool = True) -> IdentityResult:
-        parts = [p.strip() for p in (id_number or document_ref or "").split("|")]
+        given = (id_number or document_ref or "").strip()
         selfie_ref = selfie_ref or ""
+        if not given:
+            return IdentityResult(False, False, failure_reason="Enter your ID number or add a photo of your document")
+        if "|" not in given:  # a real number or photo: approved, with the profile's own name and date of birth
+            return IdentityResult(True, True, face_ref=f"face:{selfie_ref or liveness_session or 'stand-in'}")
+        parts = [p.strip() for p in given.split("|")]
         flags = {p.lower() for p in parts[2:]}
-        if len(parts) < 2:
-            return IdentityResult(False, False, failure_reason="Document could not be read")
         try:
             dob = date.fromisoformat(parts[1])
         except ValueError:
