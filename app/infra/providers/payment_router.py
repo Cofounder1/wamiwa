@@ -28,6 +28,9 @@ class PaymentRouter(PaymentGateway):
     async def transfer(self, **kwargs) -> TransferResult:
         return await self.main.transfer(**kwargs)
 
+    async def transfer_status(self, provider_ref: str) -> tuple[str, str | None]:
+        return await self.main.transfer_status(provider_ref)
+
     async def resolve_account_name(self, bank_code: str, account_number: str, claimed_name: str | None = None) -> str | None:
         return await self.main.resolve_account_name(bank_code, account_number, claimed_name)
 

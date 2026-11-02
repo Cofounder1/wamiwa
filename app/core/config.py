@@ -89,10 +89,14 @@ class Settings(BaseSettings):
     # Not read yet: every provider still runs on its sandbox adapter. Each key is used once the
     # matching adapter is written and wired in app/container.py.
     # YouVerify (ON-05): ID lookups, face matching and its live check. Off until the key and merchant key are set.
-    # Sandbox keys only work with youverify_environment="sandbox"; live keys need "live".
+    # Sandbox keys only work against YouVerify's sandbox and live keys against live (see youverify_environment).
     youverify_api_key: str | None = None
     youverify_public_merchant_key: str | None = None  # safe in the browser: it starts the live check
-    youverify_environment: str = "sandbox"  # sandbox | live
+    # sandbox | live. Left unset, it follows where the app runs: sandbox on a laptop, live on the live site. ID checks
+    # move no money, and YouVerify's sandbox only knows test records, so real testers need the live service.
+    youverify_environment: str | None = None
+    youverify_sandbox_api_key: str | None = None  # used instead of the live keys outside production
+    youverify_sandbox_public_merchant_key: str | None = None
     # LK-01: celebrity names only the person themselves may use for a likeness page or a promoted name
     protected_identity_names: list[str] = Field(default_factory=lambda: [
         "burna boy", "davido", "wizkid", "tiwa savage", "beyonce"])
@@ -318,6 +322,16 @@ class Settings(BaseSettings):
         if self.paypal_sandbox_client_id and self.paypal_sandbox_secret:
             self.paypal_client_id, self.paypal_secret = self.paypal_sandbox_client_id, self.paypal_sandbox_secret
             self.paypal_environment = "sandbox"
+        if self.youverify_sandbox_api_key and self.youverify_sandbox_public_merchant_key:
+            self.youverify_api_key = self.youverify_sandbox_api_key
+            self.youverify_public_merchant_key = self.youverify_sandbox_public_merchant_key
+            self.youverify_environment = "sandbox"
+        return self
+
+    @model_validator(mode="after")
+    def _youverify_environment(self) -> "Settings":
+        if self.youverify_environment is None:
+            self.youverify_environment = "live" if self.is_production else "sandbox"
         return self
 
 

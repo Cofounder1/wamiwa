@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import Agent, CompanyKey, Services, ok, ok_page, signed_body
 from app.core.enums import PostType
-from app.core.exceptions import NotFound, Unprocessable
+from app.core.exceptions import NotFound, Unauthorized, Unprocessable
+from app.models import Payout
 
 agent_router = APIRouter(prefix="/api/agent/v1", tags=["agent-api"])
 company_router = APIRouter(prefix="/api/company/v1", tags=["company-api"])
@@ -186,6 +187,27 @@ def _json(body: bytes) -> dict:
 async def payment_webhook(request: Request, svc: Services):
     data = _json(await signed_body(request, request.app.state.infra.settings.payment_webhook_secret))
     return ok(await svc.payment_events.handle(str(data.get("type")), str(data.get("provider_ref"))))
+
+
+@webhook_router.post("/flutterwave")
+async def flutterwave_webhook(request: Request, svc: Services):
+    """Flutterwave's events, checked against the secret hash set in its dashboard (Settings > Webhooks), which
+    Flutterwave sends back in the `verif-hash` header. A transfer's outcome confirms or reverses a payout; a payment
+    needs nothing here, because each one is verified when it's used and unused ones are refunded by a job."""
+    expected = request.app.state.infra.settings.flutterwave_webhook_hash
+    given = request.headers.get("verif-hash", "")
+    if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+        raise Unauthorized("Invalid webhook signature", code="invalid_signature")
+    event = _json(await request.body())
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    kind = str(event.get("event") or event.get("event.type") or "")
+    if kind.startswith("transfer") and str(data.get("reference") or "").startswith("payout_"):
+        payout = await svc.payouts.repo(Payout).get(str(data["reference"]).removeprefix("payout_"))
+        if payout is not None:
+            status = {"SUCCESSFUL": "confirmed", "FAILED": "failed"}.get(str(data.get("status") or "").upper(), "sent")
+            outcome = await svc.payouts.apply_transfer_outcome(payout, status, data.get("complete_message"))
+            return ok({"handled": kind, "payout": outcome})
+    return ok({"handled": None})
 
 
 @webhook_router.post("/africastalking/voice")

@@ -29,7 +29,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | API | 273 operations: 211 for people and companies, 45 for admins, 13 for agents (`/api/agent/v1`), 4 for the company API (`/api/company/v1`), plus signed webhooks for payments, calls and video |
 | API reference | http://127.0.0.1:8000/docs while the server runs |
 | Data | 64 tables |
-| Scheduled jobs | 35, listed below |
+| Scheduled jobs | 36, listed below |
 | Tests | 98 end-to-end tests: `.venv/bin/python -m pytest` |
 | Run it | `.venv/bin/uvicorn app.main:app_factory --factory --reload`, or `docker compose up --build` |
 | Docker | `Dockerfile` (one image for the API and the jobs worker) and `docker-compose.yml` (API, worker, Redis, local Postgres 17) |
@@ -63,7 +63,7 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | Supabase | Database | Connected |
 | Resend | Email | Connected. Domain `wamiwa.site` verified; sends as `info@wamiwa.site`, replies go to `info@wamiwa.site` |
 | HeyGen | AI video | Key works (allowance of 300). Not connected: awaiting a trial and answers on price, languages and minors |
-| Flutterwave | Payments, escrow, payouts (Naira and US dollars) | Built and tested against a fake Flutterwave; needs its keys set (see .env.example) |
+| Flutterwave | Payments, escrow, payouts (Naira and US dollars) | Built and tested against a fake Flutterwave; test and live keys set. Webhook to set in both Flutterwave dashboards: `https://<api address>/webhooks/flutterwave` with the secret hash in `WAMIWA_FLUTTERWAVE_WEBHOOK_HASH` |
 | Exchange rate | The day's dollar to Naira rate | Taken from Flutterwave once its keys are set; a fixed test rate (1,500) until then |
 | PayPal | A second way to pay, in US dollars (payouts stay with Flutterwave) | Built and tested against a fake PayPal; off until Wamiwa's PayPal account and API keys are ready. Until then it refuses with "PayPal isn't available yet" |
 | YouVerify | ID and liveness checks | Built and tested against a fake YouVerify; sandbox keys set. Needs YouVerify to enable liveness results (Liveness History) on the account, and live keys for the site |
@@ -98,7 +98,7 @@ Anything not connected runs on a built-in stand-in, so the whole app works for d
 | Guardians | Retry confirmation calls; expire unconfirmed minor contracts |
 | Video | Check generation progress; auto-approve after 72 hours; renew video plans |
 | Disputes | Close evidence windows; apply decisions nobody appealed |
-| Money | Fortnightly payouts; finish stuck payouts; retry failed refunds; refund Flutterwave payments that paid for nothing (every 30 minutes); daily reconciliation with the payment provider |
+| Money | Fortnightly payouts; finish stuck payouts; retry failed refunds; refund Flutterwave payments that paid for nothing and confirm or reverse sent payouts (each every 30 minutes); daily reconciliation with the payment provider |
 | Subscriptions and plans | Renewals; lapse notices; Wamiwa Agent renewals; daily scam-link recheck; weekly artist profile lookup |
 | Content and email | Daily post ideas; daily notification digests; deadline reminders; daily admin queue summary |
 | Accounts | Convert minors at 18; recheck connected social accounts; yearly popularity card reviews; delete accounts after the 30-day grace period |
