@@ -206,7 +206,7 @@ class EscrowService(BaseService):
         EscrowState.DELIVERED: (EscrowState.CLEARED, EscrowState.FROZEN, EscrowState.REFUNDED, EscrowState.ACTIVE),
         EscrowState.CLEARED: (EscrowState.PAID, EscrowState.FROZEN),
         EscrowState.FROZEN: (EscrowState.CLEARED, EscrowState.REFUNDED, EscrowState.ACTIVE, EscrowState.DELIVERED),
-        EscrowState.PAID: (),
+        EscrowState.PAID: (EscrowState.CLEARED,),  # only when the bank rejects the payout transfer
         EscrowState.REFUNDED: (),
     }
 
@@ -458,6 +458,7 @@ class PayoutService(BaseService):
                 escrow.payout_id = None  # stays cleared and is paid in the next cycle
             return payout
         payout.status, payout.provider_ref, payout.paid_at = PayoutStatus.PAID, result.provider_ref, self.now()
+        payout.transfer_status = "sent"  # confirmed once the provider reports the bank received it
         for escrow in escrows:
             locked = await self.repo(EscrowTransaction).lock(escrow.id)
             if locked.state == EscrowState.PAID:
@@ -473,6 +474,45 @@ class PayoutService(BaseService):
                 payout.earner_id, NotificationType.PAYMENT, "Your earnings were paid to your guardian",
                 f"{payout.amount / 100:,.2f} {payout.currency}", {"payout_id": payout.id})
         return payout
+
+    async def apply_transfer_outcome(self, payout: Payout, status: str, reason: str | None) -> str:
+        """The bank's answer on a sent payout. A failure reverses it: the earnings return to cleared and are paid in
+        the next cycle, and the earner is asked to check their bank details."""
+        if payout.status != PayoutStatus.PAID or payout.transfer_status != "sent" or status == "sent":
+            return payout.transfer_status or ""
+        payout = await self.repo(Payout).lock(payout.id)
+        if status == "confirmed":
+            payout.transfer_status = "confirmed"
+            return "confirmed"
+        payout.status, payout.transfer_status = PayoutStatus.FAILED, "failed"
+        payout.failure_reason, payout.paid_at = reason or "The bank rejected the transfer", None
+        for escrow in await self.repo(EscrowTransaction).list(EscrowTransaction.payout_id == payout.id):
+            locked = await self.repo(EscrowTransaction).lock(escrow.id)
+            if locked.state == EscrowState.PAID:
+                await self.svc.escrow._transition(locked, EscrowState.CLEARED, None,
+                                                  f"Payout {payout.id} rejected by the bank", locked.net_amount)
+            locked.paid_at, locked.payout_id = None, None
+        amount = f"{payout.amount / 100:,.2f} {payout.currency}"
+        await self.svc.notifications.notify(
+            payout.account_id, NotificationType.PAYMENT, "Payout didn't reach your bank",
+            f"Your bank rejected the payout of {amount} ({payout.failure_reason}). Check your bank details; the money "
+            "is safe and is paid in the next payout cycle.", {"payout_id": payout.id})
+        await self.svc.admin.alert_admins("A payout was rejected by the bank",
+                                          f"Payout {payout.id} of {amount}: {payout.failure_reason}")
+        return "failed"
+
+    async def confirm_sent(self) -> int:
+        """Job: ask the provider about payouts it accepted but hasn't confirmed (a backup for its webhook)."""
+        sent = await self.repo(Payout).list(
+            Payout.status == PayoutStatus.PAID, Payout.transfer_status == "sent",
+            Payout.paid_at < self.now() - timedelta(minutes=5), Payout.paid_at > self.now() - timedelta(days=14),
+            limit=200)
+        settled = 0
+        for payout in sent:
+            status, reason = await self.providers.payments.transfer_status(payout.provider_ref or "")
+            if await self.apply_transfer_outcome(payout, status, reason) in ("confirmed", "failed"):
+                settled += 1
+        return settled
 
     async def finish_stuck(self) -> int:
         """Job: a payout recorded but not confirmed (the server stopped mid-way) is completed. The

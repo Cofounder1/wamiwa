@@ -15,6 +15,8 @@ class FakeFlutterwave:
         self.token_charges: list[dict] = []
         self.references: set[str] = set()
         self.rate: float | None = 1534.25  # Naira per US dollar
+        self.transfer_outcomes: dict[int, str] = {}  # transfer id -> NEW | PENDING | SUCCESSFUL | FAILED
+        self.transfer_messages: dict[int, str] = {}
         self.now = lambda: __import__("datetime").datetime.now(__import__("datetime").UTC)
 
     def pay(self, tx_ref: str, amount: str, currency: str, email: str = "payer@example.com") -> int:
@@ -52,6 +54,10 @@ class FakeFlutterwave:
         if path.endswith("/refund"):
             self.refunds.append({"transaction": int(path.split("/")[2]), **body})
             return ok({"id": 70 + len(self.refunds), "status": "completed"})
+        if path.startswith("/transfers/") and request.method == "GET" and path.split("/")[2].isdigit():
+            transfer_id = int(path.split("/")[2])
+            return ok({"id": transfer_id, "status": self.transfer_outcomes.get(transfer_id, "NEW"),
+                       "complete_message": self.transfer_messages.get(transfer_id, "")})
         if path == "/transfers":
             self.transfers.append(body)
             return ok({"id": 500 + len(self.transfers), "status": "NEW"})
@@ -262,3 +268,69 @@ async def test_a_payment_that_paid_for_nothing_is_refunded_in_full(api):
     assert await api.run("money.refund_unrecorded") == 0  # never twice
     notes = await api.ok("GET", "/notifications", brand)
     assert any(n["title"] == "Payment refunded" for n in notes)
+
+
+async def test_a_payout_the_bank_rejects_is_reversed_and_paid_again_later(api):
+    """Flutterwave accepts a transfer first and reaches the bank after. A rejection (closed account) reverses the
+    payout: earnings back to cleared, the earner told; its webhook or a job reports the outcome."""
+    from app.models import Payout
+
+    api.infra.settings.flutterwave_public_key = "FLWPUBK_TEST-x"
+    api.infra.settings.flutterwave_secret_key = "FLWSECK_TEST-x"
+    api.infra.settings.flutterwave_webhook_hash = "whsec-123"
+    fake = FakeFlutterwave()
+    api.infra.providers.payments = gateway(fake)
+    admin, brand, influencer = await hire_me_setup(api)
+    paid = fake.pay((await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 100_00}))["tx_ref"],
+                    f"{kobo(100_00) / 100:.2f}", "NGN")
+    contract = await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer) | {"payment_method": f"flw:{paid}"})
+    cid = contract["id"]
+    for step in ("accept", "start"):
+        await api.ok("POST", f"/hire-me/contracts/{cid}/{step}", influencer)
+    await api.ok("POST", f"/hire-me/contracts/{cid}/deliver", influencer, json={"delivery": "links"})
+    await api.ok("POST", f"/hire-me/contracts/{cid}/approve", brand)
+
+    assert (await api.run("payouts.run_cycle"))["sending"] == 1
+    assert (await api.ok("GET", "/earnings", influencer))["paid"] == kobo(80_00)
+    transfer_id = 500 + len(fake.transfers)
+    async with api.services() as svc:
+        payout = (await svc.payouts.repo(Payout).list())[-1]
+        assert payout.transfer_status == "sent"
+
+    # Still on its way: the job leaves it; then the bank rejects it.
+    api.clock.advance(minutes=6)
+    assert await api.run("payouts.confirm_sent") == 0
+    fake.transfer_outcomes[transfer_id], fake.transfer_messages[transfer_id] = "FAILED", "Account closed"
+    assert await api.run("payouts.confirm_sent") == 1
+    earnings = await api.ok("GET", "/earnings", influencer)
+    assert earnings["paid"] == 0 and earnings["cleared"] == kobo(80_00)  # the money is safe, paid next cycle
+    notes = await api.ok("GET", "/notifications", influencer)
+    assert any(n["title"] == "Payout didn't reach your bank" and "Account closed" in n["body"] for n in notes)
+
+    # The next cycle pays again; this time Flutterwave's webhook confirms it.
+    api.clock.advance(days=14, minutes=1)
+    assert (await api.run("payouts.run_cycle"))["sending"] == 1
+    second = 500 + len(fake.transfers)
+    async with api.services() as svc:
+        payout = (await svc.payouts.repo(Payout).list())[-1]
+    event = {"event": "transfer.completed", "data": {"id": second, "reference": f"payout_{payout.id}", "status": "SUCCESSFUL"}}
+    await api.call("POST", "/webhooks/flutterwave", json=event, headers={"verif-hash": "wrong"}, expect=401)
+    r = await api.ok("POST", "/webhooks/flutterwave", json=event, headers={"verif-hash": "whsec-123"})
+    assert r["payout"] == "confirmed"
+    assert (await api.ok("GET", "/earnings", influencer))["paid"] == kobo(80_00)
+
+
+async def test_a_bank_payment_still_confirming_can_be_used_once_it_does(api):
+    api.infra.settings.flutterwave_public_key = "FLWPUBK_TEST-x"
+    api.infra.settings.flutterwave_secret_key = "FLWSECK_TEST-x"
+    fake = FakeFlutterwave()
+    api.infra.providers.payments = gateway(fake)
+    admin, brand, influencer = await hire_me_setup(api)
+    paid = fake.pay((await api.ok("POST", "/payments/checkout", brand, json={"amount_cents": 100_00}))["tx_ref"],
+                    f"{kobo(100_00) / 100:.2f}", "NGN")
+    fake.transactions[paid]["status"] = "pending"  # a bank transfer the bank hasn't confirmed yet
+    r = await api.call("POST", "/hire-me/offers", brand, json=offer(api, influencer) | {"payment_method": f"flw:{paid}"},
+                       expect=402)
+    assert "hasn't confirmed this payment yet" in r.json()["error"]
+    fake.transactions[paid]["status"] = "successful"
+    await api.ok("POST", "/hire-me/offers", brand, json=offer(api, influencer) | {"payment_method": f"flw:{paid}"})

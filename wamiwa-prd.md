@@ -565,7 +565,8 @@ A dispute freezes the money and ends in release, refund or split; the table belo
 - Renewals (subscriptions, plans) paid by Flutterwave charge the card saved at the first payment, so nobody has to pay again by hand. PayPal saves no card, so a renewal first paid by PayPal must be paid again by hand. A renewal that fails lapses as before, with notice.
 - Refunds go back to the provider that took the payment, in the currency paid, at the rate of the original payment.
 - Payouts: creators in Nigeria are paid to a Nigerian bank in Naira, with the account name looked up and matched to their verified ID. Creators elsewhere are paid to their own bank in US dollars and must give the bank's name, SWIFT or routing number and their address; the name can't be looked up abroad, so it's matched as given.
-- Payouts are made by Flutterwave only, whichever way the money was paid in.
+- Payouts are made by Flutterwave only, whichever way the money was paid in. A payout counts as sent when Flutterwave accepts it and as confirmed when the bank receives it. Given the bank rejects it (e.g. a closed account), then the payout is reversed: the earnings return to cleared and are paid in the next cycle, and the earner is asked to check their bank details and the admins are alerted. Flutterwave's webhook reports the outcome, and a job asks Flutterwave every 30 minutes in case a webhook is missed.
+- A bank transfer or USSD payment that the bank hasn't confirmed yet is refused with "wait a minute, then try again"; the same payment works once it confirms, and one never used is refunded automatically.
 - Reconciliation compares Flutterwave's Naira balance with Naira records; dollar money (Flutterwave's dollar balance and PayPal) is kept out of it and reconciled separately.
 
 ### PY-04 Disputes
@@ -1639,6 +1640,8 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Test mode and launch (section 20) | Live keys from the first deploy | Test keys and a "Test mode" banner until a Super Admin presses Go live; test data cleared by a command first; no way back afterwards |
 | Paying for a likeness hire (LK-10) | The likeness escrow and the production fee charged separately with the same payment, which a real Flutterwave or PayPal payment can't cover | One payment for both; the likeness part is held in escrow and the production part recorded separately; each refunded on its own |
 | Identity check (ON-05, section 19) | A document photo and Wamiwa's own camera check | YouVerify's live check for everyone. Nigerian NIN or driver's licence: verified at once from the government record. Passport or a foreign ID: automatic face comparison, then staff confirm the name and date of birth |
+| Payouts (PY-05) | Marked paid when Flutterwave accepted the transfer | Sent, then confirmed by the bank; a rejected transfer is reversed and paid in the next cycle |
+| ID checks (ON-05, section 19) | One YouVerify key set, switched by hand | Sandbox keys on a laptop; live keys on the live site from the start (real testers can't verify against the sandbox) |
 | Moderation, sentiment and trends (section 19) | Vendors to choose; keyword stand-ins | Claude checks posts, comments, scripts and sentiment, with safe fallbacks; YouTube's chart per country feeds content ideas |
 | Exchange rate (section 19) | A fixed test rate; live source to choose | Flutterwave's rate, taken once a day. If Flutterwave can't give one, the last rate is used and admins are alerted once it is 2 days old |
 | Default artist links (WA-04, section 19) | Spotify, then YouTube Music, then Audiomack | Spotify, then YouTube Music, then Apple Music |

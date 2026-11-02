@@ -82,6 +82,11 @@ class PaymentGateway(ABC):
                                    claimed_name: str | None = None) -> str | None:
         """Name on the bank account, or None if it cannot be resolved. `claimed_name` is a sandbox aid."""
 
+    async def transfer_status(self, provider_ref: str) -> tuple[str, str | None]:
+        """Whether a transfer the provider accepted reached the bank: ("confirmed" | "failed" | "sent", reason).
+        Providers that only accept final transfers report "confirmed"."""
+        return "confirmed", None
+
     @abstractmethod
     async def held_balance(self, currency: str) -> int:
         """Funds the provider holds for Wamiwa, used by the daily reconciliation."""

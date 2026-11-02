@@ -71,6 +71,11 @@ class FlutterwaveGateway(PaymentGateway, FxRateProvider):
     def _settled(self, data: dict, amount: int, usd_cents: int | None) -> ChargeResult:
         """A successful transaction for exactly the expected amount, as a result with the right reference."""
         currency, paid = data.get("currency"), minor(data.get("amount", 0))
+        if data.get("status") == "pending":
+            # Bank transfers and USSD can take a few minutes. The same payment can be used again once it confirms;
+            # if it never pays for anything, it's refunded automatically.
+            return ChargeResult("failed", failure_reason="Your bank hasn't confirmed this payment yet. Wait a minute, "
+                                                         "then try again: you won't be charged twice.")
         if data.get("status") != "successful":
             return ChargeResult("failed", failure_reason="The payment wasn't completed")
         if currency == LOCAL and paid == amount:
@@ -144,6 +149,19 @@ class FlutterwaveGateway(PaymentGateway, FxRateProvider):
         # Dollar payouts leave the dollar balance, so they're marked like dollar payments and kept out of the
         # Naira reconciliation.
         return TransferResult(True, f"{'flwusd' if currency == USD else 'flw'}:transfer:{data.get('id')}")
+
+    async def transfer_status(self, provider_ref: str) -> tuple[str, str | None]:
+        """Flutterwave accepts a transfer first and reaches the bank after; a closed or wrong account fails later."""
+        transfer_id = provider_ref.rsplit(":", 1)[-1]
+        data = self._data(await self._call("GET", f"/transfers/{transfer_id}"))
+        if data is None:
+            return "sent", None  # unknown for now: asked again later
+        status = str(data.get("status") or "").upper()
+        if status == "SUCCESSFUL":
+            return "confirmed", None
+        if status == "FAILED":
+            return "failed", data.get("complete_message") or "The bank rejected the transfer"
+        return "sent", None
 
     async def resolve_account_name(self, bank_code: str, account_number: str, claimed_name: str | None = None) -> str | None:
         """Nigerian accounts are looked up; for foreign banks Flutterwave can't, so the name given is used."""

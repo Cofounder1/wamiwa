@@ -88,6 +88,9 @@ class Payout(Model):
     provider_ref: Mapped[str | None] = mapped_column(String(64))
     failure_reason: Mapped[str | None] = mapped_column(Text)
     paid_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # After the provider accepts the transfer: sent -> confirmed, or failed (the bank rejected it, e.g. a closed
+    # account). A failed transfer reverses the payout and the earnings are paid in the next cycle.
+    transfer_status: Mapped[str | None] = mapped_column(String(12), index=True)
 
 
 class Dispute(Model):

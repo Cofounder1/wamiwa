@@ -173,7 +173,7 @@ writing one adapter class each and returning it from `app/container.py`.
 
 ## Jobs
 
-`python -m app.cli list-jobs` shows all 35. They run in-process (`WAMIWA_RUN_JOBS=true`) under a Redis
+`python -m app.cli list-jobs` shows all 36. They run in-process (`WAMIWA_RUN_JOBS=true`) under a Redis
 lock per job, so several API workers do not double-run them. To run them in a separate worker
 instead, set `WAMIWA_RUN_JOBS=false` on the API and run `python -m app.cli run-scheduler`. Run one by hand with
 `python -m app.cli run-job payouts.run_cycle`.
