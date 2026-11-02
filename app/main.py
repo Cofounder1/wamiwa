@@ -132,7 +132,8 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
         services = {"payments": mode(getattr(payments, "main", payments)), "paypal": mode(paypal),
                     "payments_mode": "live" if infra.settings.is_production and await infra.launch.is_live() else "test",
                     "identity": mode(providers.identity), "email": mode(providers.email), "sms": mode(providers.sms),
-                    "voice": mode(providers.voice)}
+                    "voice": mode(providers.voice), "moderation": mode(providers.moderation),
+                    "trends": mode(providers.trends)}
         return JSONResponse({"status": "ok" if healthy else "degraded", **checks, "services": services},
                             status_code=200 if healthy else 503)
 

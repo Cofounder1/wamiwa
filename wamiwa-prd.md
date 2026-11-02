@@ -1440,9 +1440,9 @@ Each of these needs a provider chosen before build starts on the epics that use 
 | Automated calls + SMS OTP | ON-04, LK-09 | Africa's Talking (SMS, and the confirmation call with keypad input and a recorded spoken confirmation) |
 | Email delivery | ON-01, NT-01 | Resend (sending domain wamiwa.site) |
 | Social login for follower checks (Instagram, TikTok, X, YouTube, Facebook) | ON-07, ON-08 | Platform APIs |
-| Content moderation and sentiment (English, Pidgin, Yoruba, Igbo, Hausa) | FD-05, API-02, API-03, LK-04 | To choose |
+| Content moderation and sentiment (English, Pidgin, Yoruba, Igbo, Hausa) | FD-05, API-02, API-03, LK-04 | Claude (Anthropic): one key, a model per job (fast model for comments and sentiment, the most capable for likeness scripts) |
 | Agent runtime / hosting interface | Epic 3 | To define |
-| Outside trends data by region | WA-10 | To choose |
+| Outside trends data by region | WA-10, SB-03 | YouTube's most-popular chart per country (with the YouTube key used for artist lookups); Google Trends API if the pilot application is accepted |
 | Finding an artist's public profile by name | WA-04 | Spotify, YouTube Music (through the YouTube Data API), Apple Music |
 | Link reputation (scam, phishing, malware) | WA-11 | To choose |
 
@@ -1535,9 +1535,12 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 - [ ] Decided: suspected scam links are held back, the owner is warned, and all Admins and Super Admins are notified
 - [ ] Decided: three layers against claiming another artist's name: proven by a connected account, admin approval otherwise, and a "this is my name" claim (WA-02)
 - [ ] Decided: ordinary admins see the platform dashboard only when a Super Admin authorises it (unchanged, AD-05)
-- [ ] Recommended, to confirm: Google Web Risk for link reputation (free to 100,000 checks a month); Wamiwa's own engagement data plus YouTube's regional charts for trends, with an application to the Google Trends API pilot; China needs a separate source
+- [ ] Recommended, to confirm: Google Web Risk for link reputation (free to 100,000 checks a month)
+- [ ] Decided: trends from Wamiwa's own engagement plus YouTube's most-popular chart per country; apply to the Google Trends API pilot; China needs a separate source (YouTube is blocked there)
+- [ ] Decided: Claude for moderation, script screening and sentiment. If Claude can't answer, comments fall back to the keyword check, scripts go to admin review and sentiment is "uncertain"
+- [ ] To choose: a service that detects AI-made photos and videos (FD-01), e.g. Hive or Sightengine; until then mislabelled AI media is caught through reports
 - [ ] To confirm: access for looking artists up on Spotify, YouTube Music and Apple Music
-- [ ] To choose: the outside trends data source for content ideas, and who maintains the cultural calendar per region
+- [ ] To choose: who maintains the cultural calendar per region (the trends source is decided above)
 - [ ] To confirm: whether target regions should also decide where a plan's cards are shown (today they only shape content ideas)
 - [ ] Decided: a Playground payment buys credits
 - [ ] To set, Playground (Epic 16): whether credits expire, and refunds and disputes for spent credits
@@ -1636,6 +1639,7 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Test mode and launch (section 20) | Live keys from the first deploy | Test keys and a "Test mode" banner until a Super Admin presses Go live; test data cleared by a command first; no way back afterwards |
 | Paying for a likeness hire (LK-10) | The likeness escrow and the production fee charged separately with the same payment, which a real Flutterwave or PayPal payment can't cover | One payment for both; the likeness part is held in escrow and the production part recorded separately; each refunded on its own |
 | Identity check (ON-05, section 19) | A document photo and Wamiwa's own camera check | YouVerify's live check for everyone. Nigerian NIN or driver's licence: verified at once from the government record. Passport or a foreign ID: automatic face comparison, then staff confirm the name and date of birth |
+| Moderation, sentiment and trends (section 19) | Vendors to choose; keyword stand-ins | Claude checks posts, comments, scripts and sentiment, with safe fallbacks; YouTube's chart per country feeds content ideas |
 | Exchange rate (section 19) | A fixed test rate; live source to choose | Flutterwave's rate, taken once a day. If Flutterwave can't give one, the last rate is used and admins are alerted once it is 2 days old |
 | Default artist links (WA-04, section 19) | Spotify, then YouTube Music, then Audiomack | Spotify, then YouTube Music, then Apple Music |
 | SMS and calls (LK-09, section 19) | Vendor to choose; the whole call recorded | Africa's Talking. The guardian enters the code, presses 1 or 2, then says their name and decision after a beep; that spoken confirmation is the recording |

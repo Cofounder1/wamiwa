@@ -110,10 +110,16 @@ class Settings(BaseSettings):
     email_from_address: str = "no-reply@wamiwa.site"  # its domain must be verified in Resend
     email_from_name: str = "Wamiwa"
     email_reply_to: str | None = "info@wamiwa.site"  # where replies to Wamiwa's emails land
-    moderation_api_key: str | None = None  # vendor to choose
+    # Claude for moderation, likeness-script screening and sentiment: one Anthropic API key, a model per job.
+    moderation_api_key: str | None = None
+    # Needed only when the key belongs to the organisation rather than a workspace (Console > Workspaces, the ID).
+    moderation_workspace_id: str | None = None
+    moderation_model: str = "claude-haiku-5-5"  # posts, comments, agent replies (every one is checked)
+    script_screening_model: str = "claude-opus-5-5"  # likeness scripts (few, and they become videos of real people)
+    sentiment_model: str = "claude-haiku-5-5"  # company sentiment reports
     watermark_api_key: str | None = None  # vendor to choose
     link_safety_api_key: str | None = None  # scam / phishing reputation, to choose
-    trends_api_key: str | None = None  # outside trends by region, to choose
+    trends_api_key: str | None = None  # not used: trends come from YouTube's chart, with youtube_api_key
     spotify_client_id: str | None = None  # looking artists up by name
     spotify_client_secret: str | None = None
     youtube_api_key: str | None = None

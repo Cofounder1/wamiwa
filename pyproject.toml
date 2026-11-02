@@ -17,6 +17,7 @@ dependencies = [
     "redis>=5.0",
     "python-multipart>=0.0.9",
     "alembic>=1.13",
+    "anthropic>=2.3",
 ]
 
 [project.optional-dependencies]

@@ -10,7 +10,9 @@ from app.infra.providers.base import EmailGateway
 from app.infra.providers.resend import ResendEmailGateway
 from app.infra.providers.africastalking import AfricasTalkingSmsGateway, AfricasTalkingVoiceGateway
 from app.infra.providers.base import SmsGateway, VoiceGateway
+from app.infra.providers.claude_moderation import ClaudeModerationGateway
 from app.infra.providers.flutterwave import FlutterwaveGateway
+from app.infra.providers.youtube_trends import YouTubeTrendGateway
 from app.infra.providers.payment_router import PaymentRouter
 from app.infra.providers.paypal import PayPalGateway
 from app.infra.providers.youverify import YouVerifyIdentityGateway
@@ -106,10 +108,14 @@ def build_providers(settings: Settings, launch: LaunchState | None = None) -> Pr
         email=build_email(settings),
         sms=sms,
         voice=voice,
-        moderation=SandboxModerationGateway(),
+        moderation=ClaudeModerationGateway(
+            settings.moderation_api_key, moderation_model=settings.moderation_model,
+            script_model=settings.script_screening_model, sentiment_model=settings.sentiment_model,
+            workspace_id=settings.moderation_workspace_id)
+        if settings.moderation_api_key else SandboxModerationGateway(),
         social=SandboxSocialGateway(),
         webhooks=HttpxWebhookTransport(settings.webhook_timeout_seconds),
-        trends=SandboxTrendGateway(),
+        trends=YouTubeTrendGateway(settings.youtube_api_key) if settings.youtube_api_key else SandboxTrendGateway(),
         music=SandboxMusicCatalogGateway(),
         link_safety=SandboxLinkSafetyGateway(),
         paypal=paypal,

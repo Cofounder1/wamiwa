@@ -68,10 +68,10 @@ What exists for Wamiwa so far, where it lives, and its state. Updated Oct 15, 20
 | PayPal | A second way to pay, in US dollars (payouts stay with Flutterwave) | Built and tested against a fake PayPal; off until Wamiwa's PayPal account and API keys are ready. Until then it refuses with "PayPal isn't available yet" |
 | YouVerify | ID and liveness checks | Built and tested against a fake YouVerify; sandbox keys set. Needs YouVerify to enable liveness results (Liveness History) on the account, and live keys for the site |
 | Africa's Talking | Phone codes and alerts by SMS, guardian confirmation calls | Built and tested against a fake Africa's Talking; needs its settings (see .env.example) and the voice callback URL set on Wamiwa's number |
-| Moderation and sentiment | Content checks, sentiment in five languages | Vendor not chosen |
+| Claude (Anthropic) | Moderation of posts and comments, likeness-script screening, sentiment in five languages | Built and tested against a fake Claude; key set. An organisation-level key also needs `WAMIWA_MODERATION_WORKSPACE_ID`. AI-made media detection: vendor not chosen |
 | Video watermarking | Tracing likeness videos | Vendor not chosen |
 | Google Web Risk | Scam-link checks | Recommended (free to 100,000 checks a month); not connected |
-| Trends data | Plus content ideas | Recommended: YouTube regional charts, plus applying to the Google Trends pilot; not connected |
+| Trends data | Plus and Pro content ideas | YouTube's most-popular chart per country, using the YouTube key: connected and checked live. Google Trends pilot: apply |
 | Spotify, YouTube Music, Apple Music | Finding artists' default profiles | Keys added for all three; lookups still run on the stand-in until connected |
 | Instagram, TikTok, X, YouTube, Facebook | Creator verification, friend import | Developer apps not created |
 | Redis | Rate limits, codes, cache, job locks | Render Key Value for the live API; runs in Docker locally |
