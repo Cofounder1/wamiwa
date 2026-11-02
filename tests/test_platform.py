@@ -85,7 +85,7 @@ async def test_personal_ai_video_pricing_and_refund(api):
     assert posted["label_display"] == "Human + AI-generated"
 
     # Generation fails after payment: one retry, then an automatic refund.
-    refunds = api.infra.providers.payments.refunds
+    refunds = api.infra.providers.payments.main.refunds
     before = len(refunds)
     failed = await api.ok("POST", "/ai-videos", user, json={"script": "[fail] broken", "seconds": 60, "tier": "premium",
                                                            "payment_method": PAY})
@@ -304,7 +304,7 @@ async def test_monthly_ai_video_plan_counts_each_started_two_minutes(api):
     user = await api.influencer("maker", "Maker Person")
     plan = await api.ok("GET", "/ai-videos/plan", user)
     assert not plan["active"] and plan["terms"] == {"price_cents": 30_00, "videos": 15, "minutes_per_video": 2, "quality": "standard"}
-    charges = api.infra.providers.payments.charges
+    charges = api.infra.providers.payments.main.charges
     before = set(charges)
     plan = await api.ok("POST", "/ai-videos/plan", user, json={"payment_method": PAY})
     assert plan["active"] and plan["videos_left"] == 15

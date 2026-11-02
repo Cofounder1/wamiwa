@@ -198,3 +198,13 @@ class Upload(Model):
     content_type: Mapped[str] = mapped_column(String(80))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)  # first attached to something
+
+
+class PlatformState(Model):
+    """One row: when Wamiwa went live. Before that, payments use the test keys and the test data can be reset;
+    after it, live keys only, and nothing can switch back or reset."""
+
+    __tablename__ = "platform_state"
+
+    launched_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    launched_by: Mapped[str | None] = mapped_column(String(32))

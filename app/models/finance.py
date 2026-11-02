@@ -67,6 +67,7 @@ class Payment(Model):
     provider_ref: Mapped[str | None] = mapped_column(String(64), index=True)
     refunded_local: Mapped[int] = mapped_column(BigInteger, default=0)
     reference_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    reusable_method: Mapped[str | None] = mapped_column(String(200))  # a saved card for renewals (PY-05)
 
 
 class Payout(Model):

@@ -36,7 +36,7 @@ KINDS = ("business", "seller", "artist", "label")
 LISTED_KINDS = ("business", "seller")  # who appears in "Suggested sellers"
 TIERS = ("base", "plus")
 # Where an artist's default link is looked for, in order: the first platform they are found on is used.
-MUSIC_PLATFORMS = (("spotify", "Spotify"), ("youtube_music", "YouTube Music"), ("audiomack", "Audiomack"))
+MUSIC_PLATFORMS = (("spotify", "Spotify"), ("youtube_music", "YouTube Music"), ("apple_music", "Apple Music"))
 DEFAULT_PREFIX = "default-"
 REPORTS_TO_PAUSE_LINK = 3
 # Words artists commonly add around their name in a handle: "oshamo_music", "theoshamo", "oshamoofficial".
@@ -284,8 +284,8 @@ class PromoService(BaseService):
                            "url": n.default_link_url, "label": n.default_link_label}} for n in names],
             "links": [self._present_link(link, active) for link in links],
             "default_link_rule": {
-                "artist": "With no links added, the agent shares the profile we found on Spotify, YouTube Music or Audiomack",
-                "label": "For an artist with no links, the agent shares the profile we found on Spotify, YouTube Music or Audiomack",
+                "artist": "With no links added, the agent shares the profile we found on Spotify, YouTube Music or Apple Music",
+                "label": "For an artist with no links, the agent shares the profile we found on Spotify, YouTube Music or Apple Music",
                 "business": "With no links added, the agent shares the website on your company profile",
                 "seller": "Add at least one link for the agent to share",
             }[listing.kind],
@@ -330,6 +330,7 @@ class PromoService(BaseService):
                            code="name_taken", hint="POST /support/tickets")
 
         payment = await self.svc.payment.charge(account, PaymentPurpose.PROMOTION, self.price_cents(kind, tier), payment_method)
+        payment_method = self.svc.payment.renewal_method(payment, payment_method)
         needs_review = kind == "seller"  # an individual's shop name and links are checked by a person first
         if listing is None:
             listing = await self.repo(PromoListing).add(PromoListing(
@@ -459,7 +460,7 @@ class PromoService(BaseService):
 
     async def _find_default(self, name: PromoName) -> None:
         """An artist's default link: their profile on Spotify, or failing that YouTube Music, or failing
-        that Audiomack. Looked up one platform at a time and remembered."""
+        that Apple Music. Looked up one platform at a time and remembered."""
         name.default_link_url, name.default_link_label = None, None
         for platform, label in MUSIC_PLATFORMS:
             url = await self.providers.music.find_artist(platform, name.name)

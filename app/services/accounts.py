@@ -2,7 +2,7 @@
 from typing import Any
 
 from app.core.enums import (
-    AccountStatus, AgentCommentPolicy, FeedTab, GuardianLinkStatus, NotificationType, Queue,
+    MANDATORY_NOTIFICATIONS, AccountStatus, AgentCommentPolicy, FeedTab, GuardianLinkStatus, NotificationType, Queue,
 )
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
 from app.core.security import SecretFactory
@@ -119,6 +119,8 @@ class AccountService(BaseService):
         data: dict[str, Any] = {
             "id": account.id, "type": account.type, "handle": account.handle, "email": account.email,
             "status": account.status, "phone": account.phone, "phone_verified": bool(account.phone_verified_at),
+            # Why a suspended or frozen account is on hold, for the banner that explains it and the appeal.
+            "status_reason": account.suspended_reason if account.status in ("suspended", "frozen") else None,
             "two_factor_enabled": account.totp_enabled, "feed_preference": account.feed_preference,
             "region": account.region, "admin_role": account.admin_role,
             "sponsored_cards": not account.promo_opt_out,
@@ -138,6 +140,10 @@ class AccountService(BaseService):
                 "popularity_level": profile.popularity_level,
                 "agent_comment_policy": profile.agent_comment_policy,
                 "read_receipts": profile.read_receipts, "typing_indicators": profile.typing_indicators,
+                # NT-01: the optional notification types and whether each is on; always-on ones can't be turned off.
+                "notification_prefs": {t: (profile.notification_prefs or {}).get(t, True) for t in sorted(
+                    {str(t) for t in NotificationType} - {str(t) for t in MANDATORY_NOTIFICATIONS})},
+                "daily_digest": profile.daily_digest,
             }
         if company:
             data["company"] = {

@@ -115,11 +115,14 @@ As a user, I want to complete my profile with my niche and personal details.
 
 As an influencer, I want to verify my identity so I can earn on Wamiwa.
 
-- Accepted ID: National ID card, driver's licence, or international passport, plus a live check.
-- The live check uses the camera there and then: the person looks straight, turns left, then right, while a short clip records; a frame from it is matched to the ID photo. A saved photo can't be uploaded instead. If the browser can't open a camera, the person is asked to use their phone. The frame and clip are private: never shown back to anyone, like ID documents.
+- Accepted ID: National ID card (NIN), driver's licence, or international passport, plus a live check.
+- The live check is YouVerify's, run in the page with the camera there and then. Wamiwa asks YouVerify itself whether it passed; what the browser reports is never trusted. A saved photo can't be used instead. If the browser can't open a camera, the person is asked to use their phone. The live face is private: never shown back to anyone, like ID documents.
+- In Nigeria, with a NIN or driver's licence: the person types the number. It is looked up in the government database, and the photo there is matched to the live face. Given a match, the account is verified at once with the name and date of birth on the government record. The full number is never stored.
+- With a passport, or an ID from outside Nigeria: the person uploads a photo of the document, its photo is compared with the live face automatically, and staff confirm the name and date of birth from the document (Identity queue, 24 hours). The usual age and one-ID checks apply when they approve.
 - Required before Hire Me, Hire My Likeness, agent deployment, company payments, or any payout.
 - For minors, the guardian provides the ID.
 - Given verification fails, then I see the reason and can retry up to 3 times before manual review.
+- One person, one account: an ID (same name and date of birth) already verified on another account that isn't deleted is refused, with a pointer to support, and staff are alerted (it may be a suspended person returning). Genuine cases are sorted out by support.
 
 ### ON-06 Add bank account
 
@@ -373,6 +376,22 @@ As an influencer, I want to mark work as delivered and get paid.
 | Brand cancels after work started | Influencer keeps 25% of net amount |
 | Brand cancels after delivery | Influencer keeps 100% of net amount |
 
+### HM-06 Equity deals
+
+As an influencer, I want to accept shares in a company I believe in, with or without cash.
+
+- Influencers choose "Open to equity offers" on their Hire Me page (adults only). Brands can only offer equity to those who opted in.
+- A deal is either cash plus equity, or equity only:
+  - Cash plus equity: the cash goes through escrow as usual and carries Wamiwa's fee. The cash part can be as low as 50% of the influencer's starting price (a setting), not lower, so a token amount can't be used to avoid the equity-only fee.
+  - Equity only: no cash and no escrow. The brand and the influencer each pay Wamiwa a $5 service fee (a setting): the brand when sending the offer, refunded if it's declined, withdrawn or expires; the influencer when accepting.
+- Only verified companies with a registration number can offer equity. The offer states either a percentage or a number of shares, the share class, vesting and cliff in months, and attaches the agreement as an uploaded document.
+- The offer, notification and contract show the equity terms with this notice: Wamiwa doesn't hold, value, transfer or guarantee the equity; escrow and disputes cover only the cash; shares in private companies are often worth nothing. The influencer must confirm they understand before accepting.
+- Given the influencer accepts, then the brand and the influencer each get an email summarising the deal: the equity, the share class, vesting and the dates shares vest, and any cash.
+- Given shares are due to vest (at the end of the cliff, and when fully vested) and the agreement is active, then both get a reminder. Cancelled agreements, ended contracts and agreements waiting on a cancellation decision get none.
+- Either side can ask to cancel the equity agreement, with a reason. The request goes to Wamiwa's review queue and the other side is told; reminders pause meanwhile. Given Wamiwa approves, then the agreement is cancelled and reminders stop; given not, it stays active. Both are told the outcome.
+- Equity-only deals have no cash, so there's nothing to dispute; ending them goes through cancellation. Issuing and registering the shares is between the two parties.
+- Phase 2 (later, only with legal approval): a licensed partner for agreements, vesting and share records.
+
 ## 7. Epic 5 — Hire My Likeness
 
 Brands rent an influencer's AI likeness for one month from a script the influencer approves; no likeness video goes live without the influencer approving the final cut. Wamiwa takes 20%.
@@ -468,7 +487,7 @@ The guardian approves twice, once in the app and once on the call; a decline at 
 2. Guardian reviews the full contract and script in their own account and taps Approve.
 3. Wamiwa's automated system calls the guardian's verified number, reads out brand, fee and contract length. The guardian enters a one-time code sent to that number, then presses 1 to approve or 2 to decline.
 4. Missed call → 2 more attempts over 48 hours; the guardian can also call support.
-5. The call is recorded and linked to the contract. Only then is the contract active and the brand notified.
+5. The guardian then says their full name and their decision after a beep. That recording is linked to the contract, and only then is the contract active and the brand notified. A call that ends before the recording decides nothing.
 6. No confirmation within 7 days → offer expires and escrow is refunded.
 
 Protections:
@@ -494,6 +513,7 @@ Video production is charged on top of the influencer's likeness price. Prices ar
 | Scale plan | $499 per month | 14 videos (about $36 each) |
 | ARCON filing service (optional) | ARCON's fee at cost + a flat handling fee (amount to set) | Wamiwa files the advert for ARCON approval on the brand's behalf |
 
+- The likeness price and the production charge are paid in one payment when the script is sent. Wamiwa holds the likeness part in escrow; if the offer ends before any video is made, both parts are refunded.
 - Unused plan videos roll over for one month, then expire.
 - Videos default to 60 seconds; longer videos use the extra-length price.
 - Plans renew monthly and can be cancelled any time; cancellation takes effect at the end of the paid month.
@@ -536,6 +556,17 @@ A dispute freezes the money and ends in release, refund or split; the table belo
 - Refunds return to the hirer within 5 working days.
 - Card payments clear only after the payment provider's risk check.
 - Given a chargeback after payout, then the brand account is frozen and the amount is pursued from the brand, not the earner.
+
+### PY-05 Paying and being paid, at home and abroad
+
+- Two ways to pay: Flutterwave (card and bank) and PayPal. Flutterwave charges in Naira for people in Nigeria and in US dollars for everyone else (by the country on their account). PayPal always charges in US dollars, and anyone can choose it. Wamiwa's own records, escrow and fees stay in Naira; dollar amounts are converted at the day's rate, locked as before.
+- PayPal is shown as "not available yet" and refuses payments until Wamiwa's PayPal account is connected; Flutterwave works meanwhile.
+- Paying: Wamiwa opens Flutterwave's checkout, or creates a PayPal order, for the exact price. Wamiwa then verifies the payment with the provider before acting on it: it succeeded, it was started by this account, it's for exactly the price, and it hasn't paid for anything else already.
+- Renewals (subscriptions, plans) paid by Flutterwave charge the card saved at the first payment, so nobody has to pay again by hand. PayPal saves no card, so a renewal first paid by PayPal must be paid again by hand. A renewal that fails lapses as before, with notice.
+- Refunds go back to the provider that took the payment, in the currency paid, at the rate of the original payment.
+- Payouts: creators in Nigeria are paid to a Nigerian bank in Naira, with the account name looked up and matched to their verified ID. Creators elsewhere are paid to their own bank in US dollars and must give the bank's name, SWIFT or routing number and their address; the name can't be looked up abroad, so it's matched as given.
+- Payouts are made by Flutterwave only, whichever way the money was paid in.
+- Reconciliation compares Flutterwave's Naira balance with Naira records; dollar money (Flutterwave's dollar balance and PayPal) is kept out of it and reconciled separately.
 
 ### PY-04 Disputes
 
@@ -710,7 +741,7 @@ As any account, I want to report another account, post, comment or script.
 As a user, I want racism and insults against Yoruba people dealt with firmly, without anyone being punished on a false report.
 
 - Reason "Racism or insulting Yoruba people". Covers racism, and insults against Yoruba people; other ethnic groups are not covered yet.
-- Given a post or comment is reported for it, then it is hidden at once while the report is investigated.
+- Given a post or comment is reported for it by an ID-verified person with no false reports, or by a second person, then it is hidden at once while the report is investigated. A single report from anyone else goes to the team as high priority without hiding the content, so one bad-faith report can't silence someone.
 - The report goes, as high priority, to the investigation queue. Only admins a Super Admin has given the "investigate" permission (the investigation team) can take and decide it. Target: 24 hours.
 - Given the team upholds it, then the content is removed, the account is suspended (one appeal within 14 days, as for any suspension), and the reporter and that account are blocked from each other.
 - Given the team doesn't uphold it, then the hidden content comes back and no one is suspended.
@@ -926,6 +957,7 @@ As an agent owner, I want to see and control what my agent does.
 ### AI-05 No personal information from agents
 
 - Whatever an agent is asked, it can't give out personal information. Anything an agent writes through the Agent API (posts, comments, replies, order notes, order messages and deliveries) is refused if it contains a phone number, email address, or bank account, ID or card number, and the response says what was found.
+- Numbers written as words are caught too ("zero eight zero three…", "double five"), in English and Yoruba.
 - Ordinary numbers (prices, percentages, years, order numbers, links) are allowed.
 - Street addresses and names are not detected yet; that needs a dedicated service (section 21).
 
@@ -1054,7 +1086,7 @@ As an artist or label, I want the links I choose shared when I am mentioned.
 
 - An artist gives a stage name and the links to share (WA-09): streaming profiles, a new single, tickets, anything.
 - A label adds each artist on its roster, up to 50, and gives each artist their own links.
-- Default link: given an artist (or a label's artist) has no links of their own, then the agent shares that artist's profile on Spotify; if they are not on Spotify, on YouTube Music; if not there, on Audiomack. Wamiwa looks the artist up by name, one platform at a time, and checks again every week.
+- Default link: given an artist (or a label's artist) has no links of their own, then the agent shares that artist's profile on Spotify; if they are not on Spotify, on YouTube Music; if not there, on Apple Music. Wamiwa looks the artist up by name, one platform at a time, and checks again every week.
 - The plan screen shows which default was found, so a wrong match can be fixed by adding a link, which always replaces the default.
 - Given an artist is found on none of the three and has no links, then the name is still tappable but there is nothing for the agent to share.
 - A mention of an artist shares only that artist's links.
@@ -1398,18 +1430,20 @@ Each of these needs a provider chosen before build starts on the epics that use 
 
 | Need | Used in | Provider |
 | --- | --- | --- |
-| ID verification + liveness + face match | ON-05, LK-01, AV-01 | YouVerify |
-| Payments, escrow and bank payouts (local currency) | Epic 6 | Korapay (confirm it supports holding funds before release) |
-| Bank account name lookup | ON-06 | Korapay (confirm it offers account name lookup; YouVerify as fallback) |
+| ID verification + liveness + face match | ON-05, LK-01, AV-01 | YouVerify: NIN and driver's licence lookups, face comparison, and its liveness SDK. Passports and IDs from outside Nigeria are checked by staff after an automatic face comparison |
+| Payments, escrow and bank payouts (Naira and US dollars) | Epic 6 | Flutterwave (PY-05) |
+| Second way to pay (US dollars) | Epic 6 | PayPal (PY-05); not connected yet |
+| Day's US dollar to Naira rate | LK-02, LK-10, SB-01, PY-05 | Flutterwave's own rate, so conversions match the money it moves; the last rate is kept if it is unavailable |
+| Bank account name lookup | ON-06 | Flutterwave (Nigerian banks; names at foreign banks are matched as given) |
 | AI video generation (face + voice) | LK-06, AV-01, CO-02 | HeyGen (photo avatars, voice cloning and a subject-consent flow via API) |
 | Invisible video watermarking | LK-07, AV-01 | To choose |
-| Automated calls + SMS OTP | ON-04, LK-09 | To choose |
+| Automated calls + SMS OTP | ON-04, LK-09 | Africa's Talking (SMS, and the confirmation call with keypad input and a recorded spoken confirmation) |
 | Email delivery | ON-01, NT-01 | Resend (sending domain wamiwa.site) |
 | Social login for follower checks (Instagram, TikTok, X, YouTube, Facebook) | ON-07, ON-08 | Platform APIs |
-| Content moderation and sentiment (English, Pidgin, Yoruba, Igbo, Hausa) | FD-05, API-02, API-03, LK-04 | To choose |
+| Content moderation and sentiment (English, Pidgin, Yoruba, Igbo, Hausa) | FD-05, API-02, API-03, LK-04 | Claude (Anthropic): one key, a model per job (fast model for comments and sentiment, the most capable for likeness scripts) |
 | Agent runtime / hosting interface | Epic 3 | To define |
-| Outside trends data by region | WA-10 | To choose |
-| Finding an artist's public profile by name | WA-04 | Spotify, YouTube Music, Audiomack (access to each to confirm) |
+| Outside trends data by region | WA-10, SB-03 | YouTube's most-popular chart per country (with the YouTube key used for artist lookups); Google Trends API if the pilot application is accepted |
+| Finding an artist's public profile by name | WA-04 | Spotify, YouTube Music (through the YouTube Data API), Apple Music |
 | Link reputation (scam, phishing, malware) | WA-11 | To choose |
 
 ## 20. Non-functional requirements
@@ -1456,6 +1490,13 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 - Every upload records who uploaded it. A file can only be attached by its uploader (or, for an agent, its owner) and only where that kind of file belongs, e.g. a live-check capture for ID verification, never a saved photo. On the live site, anything that isn't an uploaded file is refused.
 - Photos and videos are served with headers that stop them ever running as a page; documents download rather than open; ID documents, live-check captures and likeness voice samples are never served back.
 - Files nobody attached within a day are deleted. Closing an account deletes its files, not just the references to them (DL-01).
+- Photos and videos have their hidden metadata removed on upload, above all the GPS position phones record, so nobody can learn where a photo was taken.
+
+### Links and the live site
+
+- Every link in a post or comment (new or edited) is checked for scams; a suspicious one holds the content for review, as WA-11 does for Wamiwa Agent links. Company API replies with one are refused.
+- On the live site, payments and ID checks refuse with a clear message until the real providers are connected; the stand-ins, which approve everything, are only for development and tests.
+- Test mode before launch: the live site first runs on the payment providers' test keys, so testers can use it without real money, and every page shows a "Test mode" banner. Before launch, the test data is cleared with a command run by hand (admins, the Wamiwa Agent, the category maps and the audit log are kept). Then a Super Admin presses Go live (fresh two-factor code, "GO LIVE" typed out), which switches payments to the live keys for good. Go live is refused while any test payment is still recorded; after it, there is no way back to test mode and the reset can't run.
 
 ## 21. Out of scope and open decisions
 
@@ -1490,13 +1531,16 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 - [ ] Decided: base packages share 5 links (business, seller) or 3 (artist, each label artist); Plus is $10 more, doubles the links and adds trend-based content ideas
 - [ ] Decided: a deleted link stops being shared; a lapsed plan's links stop working but stay saved
 - [ ] Decided: agent owners name their own prices and credit spend rules, and agree to Wamiwa's percentage when deploying
-- [ ] Decided: with no links added, artists default to their Spotify, YouTube Music or Audiomack profile (in that order) and businesses to their website
+- [ ] Decided: with no links added, artists default to their Spotify, YouTube Music or Apple Music profile (in that order) and businesses to their website
 - [ ] Decided: suspected scam links are held back, the owner is warned, and all Admins and Super Admins are notified
 - [ ] Decided: three layers against claiming another artist's name: proven by a connected account, admin approval otherwise, and a "this is my name" claim (WA-02)
 - [ ] Decided: ordinary admins see the platform dashboard only when a Super Admin authorises it (unchanged, AD-05)
-- [ ] Recommended, to confirm: Google Web Risk for link reputation (free to 100,000 checks a month); Wamiwa's own engagement data plus YouTube's regional charts for trends, with an application to the Google Trends API pilot; China needs a separate source
-- [ ] To confirm: access for looking artists up on Spotify, YouTube Music and Audiomack
-- [ ] To choose: the outside trends data source for content ideas, and who maintains the cultural calendar per region
+- [ ] Recommended, to confirm: Google Web Risk for link reputation (free to 100,000 checks a month)
+- [ ] Decided: trends from Wamiwa's own engagement plus YouTube's most-popular chart per country; apply to the Google Trends API pilot; China needs a separate source (YouTube is blocked there)
+- [ ] Decided: Claude for moderation, script screening and sentiment. If Claude can't answer, comments fall back to the keyword check, scripts go to admin review and sentiment is "uncertain"
+- [ ] To choose: a service that detects AI-made photos and videos (FD-01), e.g. Hive or Sightengine; until then mislabelled AI media is caught through reports
+- [ ] To confirm: access for looking artists up on Spotify, YouTube Music and Apple Music
+- [ ] To choose: who maintains the cultural calendar per region (the trends source is decided above)
 - [ ] To confirm: whether target regions should also decide where a plan's cards are shown (today they only shape content ideas)
 - [ ] Decided: a Playground payment buys credits
 - [ ] To set, Playground (Epic 16): whether credits expire, and refunds and disputes for spent credits
@@ -1512,6 +1556,10 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 - [ ] To choose: permanent file storage for uploads (recommended: Supabase Storage); the server's own disk is wiped on every deploy on Render
 - [ ] To choose: converting uploaded videos so they play everywhere (iPhone .mov files often don't play in Chrome or on Android)
 - [ ] To choose: a service that detects street addresses and names, for AI-05 and chat summaries
+- [ ] To set up: Flutterwave account approval for international (dollar) collections and payouts, its webhook secret hash, and how dollar balances are reconciled
+- [ ] To set up: YouVerify must allow Wamiwa to read liveness results (Liveness History); it answers "Permission denied" today. Also ask whether document-capture results can be fetched or verified by Wamiwa's server, so passports could be read automatically
+- [ ] To set up: Wamiwa's PayPal business account and live API credentials, and how PayPal's dollar balance is reconciled and moved to Flutterwave for payouts
+- [ ] Lawyer to confirm: whether recording cash-plus-equity offers (HM-06) needs an SEC licence or a licensed partner, and the wording of the equity notice
 
 ## 22. Change log
 
@@ -1579,3 +1627,20 @@ The platform holds faces, voices, IDs and money, so security and privacy carry t
 | Agent answers (new AI-06) | Plain text only | Plain or structured (headings, lists, tables, code, links) |
 | Files (section 20) | The browser's label was trusted; any file reference could be used by anyone; deleted accounts' files stayed on disk | Contents checked, files tied to their uploader, unused files cleaned up, a closed account's files deleted |
 | AI video (new AV-02) | Pay per minute only | Also a $30/month plan: 15 standard videos of up to 2 minutes; longer videos use one per started 2 minutes |
+| Equity (HM-06) | Cash only | Brands can offer equity alongside cash to influencers who opted in; Wamiwa records it but escrow covers only the cash |
+| Equity deals (HM-06) | Cash plus equity only | Also equity-only deals ($5 service fee from each side); deal summary email to both; vesting reminders while active; cancellation through Wamiwa |
+| Loopholes closed (ON-05, RP-02, AI-05, section 20) | — | One ID per account; credible or second report before hiding; spelled-out numbers caught; photo and video location removed; scam links in posts and comments held; stand-in payments and ID checks refused on the live site |
+| Payments (new PY-05) | Korapay, Naira only | Flutterwave for everything: Naira at home, US dollars elsewhere; verified checkout, saved cards for renewals, dollar payouts to foreign banks |
+
+### Oct 19, 2026
+
+| Area | Before | Now |
+| --- | --- | --- |
+| Test mode and launch (section 20) | Live keys from the first deploy | Test keys and a "Test mode" banner until a Super Admin presses Go live; test data cleared by a command first; no way back afterwards |
+| Paying for a likeness hire (LK-10) | The likeness escrow and the production fee charged separately with the same payment, which a real Flutterwave or PayPal payment can't cover | One payment for both; the likeness part is held in escrow and the production part recorded separately; each refunded on its own |
+| Identity check (ON-05, section 19) | A document photo and Wamiwa's own camera check | YouVerify's live check for everyone. Nigerian NIN or driver's licence: verified at once from the government record. Passport or a foreign ID: automatic face comparison, then staff confirm the name and date of birth |
+| Moderation, sentiment and trends (section 19) | Vendors to choose; keyword stand-ins | Claude checks posts, comments, scripts and sentiment, with safe fallbacks; YouTube's chart per country feeds content ideas |
+| Exchange rate (section 19) | A fixed test rate; live source to choose | Flutterwave's rate, taken once a day. If Flutterwave can't give one, the last rate is used and admins are alerted once it is 2 days old |
+| Default artist links (WA-04, section 19) | Spotify, then YouTube Music, then Audiomack | Spotify, then YouTube Music, then Apple Music |
+| SMS and calls (LK-09, section 19) | Vendor to choose; the whole call recorded | Africa's Talking. The guardian enters the code, presses 1 or 2, then says their name and decision after a beep; that spoken confirmation is the recording |
+| Payments (PY-05, section 19) | Flutterwave only; section 19 still named Korapay | Flutterwave and PayPal. PayPal is a second way to pay, in US dollars, off until its account is connected; refunds go back to whichever provider was paid; payouts stay with Flutterwave |

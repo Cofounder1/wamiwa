@@ -12,7 +12,7 @@ from app.infra.cache import CacheService
 from app.infra.database import Database, UnitOfWork
 from app.infra.kv import KeyValueStore
 from app.infra.providers.base import (
-    EmailGateway, FxRateProvider, IdentityGateway, LinkSafetyGateway, ModerationGateway, MusicCatalogGateway, PaymentGateway, SmsGateway,
+    EmailGateway, FxRateProvider, IdentityGateway, LinkSafetyGateway, ModerationGateway, MusicCatalogGateway, PaymentGateway, PayPalCheckout, SmsGateway,
     SocialGateway, TrendGateway, VideoGateway, VoiceGateway, WatermarkGateway, WebhookTransport,
 )
 from app.infra.rate_limit import RateLimiter, RateLimitPolicies
@@ -21,6 +21,7 @@ from app.models.base import Model
 from app.repositories.base import Repository
 
 if TYPE_CHECKING:
+    from app.infra.launch import LaunchState
     from app.services.registry import ServiceRegistry
 
 M = TypeVar("M", bound=Model)
@@ -42,6 +43,7 @@ class Providers:
     trends: TrendGateway
     music: MusicCatalogGateway
     link_safety: LinkSafetyGateway
+    paypal: PayPalCheckout  # creates PayPal orders; their charges go through `payments`
 
 
 @dataclass
@@ -52,6 +54,7 @@ class Infrastructure:
     clock: Clock
     db: Database
     kv: KeyValueStore
+    launch: "LaunchState"
     cache: CacheService
     limiter: RateLimiter
     policies: RateLimitPolicies

@@ -13,7 +13,7 @@ from app.models.finance import (
 from app.models.platform import (
     AdminInvite, AdminPermission, ApiKey, AuditLog, B2BCategoryLink, Conversation,
     ConversationParticipant, Message, Notification, QueueItem, ReconciliationRun, Report,
-    SupportTicket, TicketMessage, Upload,
+    PlatformState, SupportTicket, TicketMessage, Upload,
 )
 from app.models.promo import (
     PromoCategoryKeyword, PromoClaim, PromoDailyStat, PromoLink, PromoListing, PromoMatch, PromoName,

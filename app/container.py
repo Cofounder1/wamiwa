@@ -5,8 +5,19 @@ from app.core.utils import Clock, set_default_clock
 from app.infra.cache import CacheService
 from app.infra.database import Database
 from app.infra.kv import InMemoryKeyValueStore, KeyValueStore, RedisKeyValueStore, ResilientKeyValueStore
+from app.infra.launch import LaunchState, LaunchSwitch
 from app.infra.providers.base import EmailGateway
 from app.infra.providers.resend import ResendEmailGateway
+from app.infra.providers.africastalking import AfricasTalkingSmsGateway, AfricasTalkingVoiceGateway
+from app.infra.providers.base import SmsGateway, VoiceGateway
+from app.infra.providers.claude_moderation import ClaudeModerationGateway
+from app.infra.providers.flutterwave import FlutterwaveGateway
+from app.infra.providers.youtube_trends import YouTubeTrendGateway
+from app.infra.providers.payment_router import PaymentRouter
+from app.infra.providers.paypal import PayPalGateway
+from app.infra.providers.youverify import YouVerifyIdentityGateway
+from app.infra.storage import LocalFileStorage
+from app.infra.providers.unavailable import IdentityNotConnected, PaymentsNotConnected, PayPalNotConnected
 from app.infra.providers.sandbox import (
     HttpxWebhookTransport, SandboxEmailGateway, SandboxLinkSafetyGateway, SandboxMusicCatalogGateway, SandboxTrendGateway, SandboxIdentityGateway, SandboxModerationGateway,
     SandboxPaymentGateway, SandboxSmsGateway, SandboxSocialGateway, SandboxVideoGateway,
@@ -26,27 +37,88 @@ def build_email(settings: Settings) -> EmailGateway:
     return SandboxEmailGateway()
 
 
-def build_providers(settings: Settings) -> Providers:
+def build_sms_and_voice(settings: Settings) -> tuple[SmsGateway, VoiceGateway]:
+    """Africa's Talking once its username and key are set; calls also need its voice number and callback token."""
+    at = settings.africastalking_username and settings.africastalking_api_key
+    sms = (AfricasTalkingSmsGateway(settings.africastalking_username, settings.africastalking_api_key,
+                                    settings.africastalking_sender_id) if at else SandboxSmsGateway())
+    calls = at and settings.africastalking_voice_number and settings.africastalking_callback_token
+    voice = (AfricasTalkingVoiceGateway(settings.africastalking_username, settings.africastalking_api_key,
+                                        settings.africastalking_voice_number) if calls else SandboxVoiceGateway())
+    return sms, voice
+
+
+def build_payments(settings: Settings, *, flutterwave_secret: str | None, paypal_client_id: str | None,
+                   paypal_secret: str | None, paypal_environment: str, stand_ins_allowed: bool):
+    """One set of payment providers: Flutterwave (or a stand-in), PayPal, and the day's rate."""
+    if flutterwave_secret:
+        main = FlutterwaveGateway(flutterwave_secret)
+    else:
+        main = SandboxPaymentGateway() if stand_ins_allowed else PaymentsNotConnected()
+    # PY-05: PayPal is a second way to pay, off until its credentials are set. It has no stand-in.
+    paypal = (PayPalGateway(paypal_client_id, paypal_secret, paypal_environment)
+              if paypal_client_id and paypal_secret else PayPalNotConnected())
+    # The day's rate comes from Flutterwave once it is connected, so conversions match the money it moves.
+    fx = main if isinstance(main, FlutterwaveGateway) else StaticFxRateProvider(
+        {("USD", settings.local_currency): settings.sandbox_fx_rate})
+    return PaymentRouter(main, paypal), paypal, fx
+
+
+def build_providers(settings: Settings, launch: LaunchState | None = None) -> Providers:
     """Sandbox adapters until the vendors in PRD section 19 are chosen and credentialed.
 
-    To go live, implement the matching port in app/infra/providers/base.py (e.g. a
-    KorapayPaymentGateway) and return it here based on settings.
+    To go live, implement the matching port in app/infra/providers/base.py (as FlutterwaveGateway does)
+    and return it here based on settings.
     """
+    # On the live site a stand-in would approve every payment and ID check, so they refuse until connected.
+    stand_ins_allowed = not settings.is_production or settings.allow_stand_in_providers
+    if settings.is_production:
+        # Test keys until a Super Admin presses Go live, live keys after. The live set never uses a stand-in.
+        test = build_payments(settings, flutterwave_secret=settings.flutterwave_sandbox_secret_key,
+                              paypal_client_id=settings.paypal_sandbox_client_id,
+                              paypal_secret=settings.paypal_sandbox_secret, paypal_environment="sandbox",
+                              stand_ins_allowed=stand_ins_allowed)
+        live = build_payments(settings, flutterwave_secret=settings.flutterwave_secret_key,
+                              paypal_client_id=settings.paypal_client_id, paypal_secret=settings.paypal_secret,
+                              paypal_environment=settings.paypal_environment, stand_ins_allowed=False)
+
+        async def not_live() -> bool:
+            return False
+
+        is_live = launch.is_live if launch else not_live
+        payments, paypal, fx = (LaunchSwitch(t, l, is_live) for t, l in zip(test, live))
+    else:  # development and tests: the (test) keys in settings, whatever the launch state
+        payments, paypal, fx = build_payments(
+            settings, flutterwave_secret=settings.flutterwave_secret_key, paypal_client_id=settings.paypal_client_id,
+            paypal_secret=settings.paypal_secret, paypal_environment=settings.paypal_environment,
+            stand_ins_allowed=stand_ins_allowed)
+    sms, voice = build_sms_and_voice(settings)
+    if settings.youverify_api_key and settings.youverify_public_merchant_key:
+        identity = YouVerifyIdentityGateway(
+            settings.youverify_api_key, settings.youverify_public_merchant_key, settings.youverify_environment,
+            storage=LocalFileStorage(settings.upload_dir), protected_names=set(settings.protected_identity_names))
+    else:
+        identity = SandboxIdentityGateway() if stand_ins_allowed else IdentityNotConnected()
     return Providers(
-        identity=SandboxIdentityGateway(),
-        payments=SandboxPaymentGateway(),
-        fx=StaticFxRateProvider({("USD", settings.local_currency): settings.sandbox_fx_rate}),
+        identity=identity,
+        payments=payments,
+        fx=fx,
         video=SandboxVideoGateway(),
         watermark=SandboxWatermarkGateway(),
         email=build_email(settings),
-        sms=SandboxSmsGateway(),
-        voice=SandboxVoiceGateway(),
-        moderation=SandboxModerationGateway(),
+        sms=sms,
+        voice=voice,
+        moderation=ClaudeModerationGateway(
+            settings.moderation_api_key, moderation_model=settings.moderation_model,
+            script_model=settings.script_screening_model, sentiment_model=settings.sentiment_model,
+            workspace_id=settings.moderation_workspace_id)
+        if settings.moderation_api_key else SandboxModerationGateway(),
         social=SandboxSocialGateway(),
         webhooks=HttpxWebhookTransport(settings.webhook_timeout_seconds),
-        trends=SandboxTrendGateway(),
+        trends=YouTubeTrendGateway(settings.youtube_api_key) if settings.youtube_api_key else SandboxTrendGateway(),
         music=SandboxMusicCatalogGateway(),
         link_safety=SandboxLinkSafetyGateway(),
+        paypal=paypal,
     )
 
 
@@ -58,13 +130,16 @@ def build_infrastructure(settings: Settings, *, clock: Clock | None = None, kv: 
         kv = RedisKeyValueStore(settings.redis_url) if settings.redis_url else InMemoryKeyValueStore(clock)
     if not isinstance(kv, ResilientKeyValueStore):
         kv = ResilientKeyValueStore(kv)
+    db = Database(settings.database_url, echo=False, pool_size=settings.database_pool_size,
+                  max_overflow=settings.database_max_overflow, schema=settings.database_schema,
+                  query_timeout_seconds=settings.database_query_timeout_seconds)
+    launch = LaunchState(db, kv)
     return Infrastructure(
         settings=settings,
         clock=clock,
-        db=Database(settings.database_url, echo=False, pool_size=settings.database_pool_size,
-                    max_overflow=settings.database_max_overflow, schema=settings.database_schema,
-                    query_timeout_seconds=settings.database_query_timeout_seconds),
+        db=db,
         kv=kv,
+        launch=launch,
         cache=CacheService(kv),
         limiter=RateLimiter(kv, clock),
         policies=RateLimitPolicies(settings),
@@ -72,5 +147,5 @@ def build_infrastructure(settings: Settings, *, clock: Clock | None = None, kv: 
         passwords=PasswordHasher(),
         tokens=TokenService(settings, clock),
         totp=Totp(clock),
-        providers=providers or build_providers(settings),
+        providers=providers or build_providers(settings, launch),
     )

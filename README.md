@@ -10,7 +10,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env
 .venv/bin/uvicorn app.main:app_factory --factory --reload     # http://localhost:8000/docs
 .venv/bin/python -m app.cli create-super-admin you@company.com yourhandle   # run for two people
-.venv/bin/python -m pytest                                    # 89 end-to-end tests
+.venv/bin/python -m pytest                                    # 98 end-to-end tests
 ```
 
 Development uses SQLite and an in-process key-value store, so nothing else needs installing.
@@ -150,14 +150,30 @@ the database.
 
 Email is connected to Resend (`WAMIWA_EMAIL_PROVIDER=resend` plus the key; tests always use the stand-in).
 
+Payments have two providers (PY-05). Flutterwave takes card and bank payments and makes every payout; it is
+used once `WAMIWA_FLUTTERWAVE_SECRET_KEY` is set. PayPal is a second way to pay, in dollars, used once
+`WAMIWA_PAYPAL_CLIENT_ID` and `WAMIWA_PAYPAL_SECRET` are set; until then it refuses with `paypal_unavailable`.
+`payment_router.py` sends each charge to the provider the payer chose (`paypal:<order id>` is PayPal, anything
+else Flutterwave) and each refund back to the provider that took the money.
+
+SMS and the guardian confirmation call use Africa's Talking once `WAMIWA_AFRICASTALKING_USERNAME` and
+`WAMIWA_AFRICASTALKING_API_KEY` are set (calls also need the voice number and callback token). During a call,
+Africa's Talking posts to `/webhooks/africastalking/voice?token=...` and Wamiwa answers each step with XML.
+
+**Test mode and launch.** On the live site, payments use the `..._SANDBOX_...` test keys and every page shows a
+"Test mode" banner until a Super Admin presses **Go live** (`/admin/go-live`); from then on the live keys, for good.
+Before that, clear the testers' data from a laptop:
+`python -m app.cli reset-test-data --database-url <live database>` lists what would go, and adding
+`--confirm wamiwa.site` deletes it. Go live is refused while test payments remain, and the reset refuses after launch.
+
 Services depend on the interfaces in `app/infra/providers/base.py`. Every other one is wired to a
 deterministic sandbox adapter (`sandbox.py`), which is what makes the whole flow testable offline. Going
-live with YouVerify, Korapay, HeyGen and the still-unchosen SMS/voice, email, watermark and moderation
-vendors means writing one adapter class each and returning it from `app/container.py`.
+live with YouVerify, HeyGen and the still-unchosen watermark and moderation vendors means
+writing one adapter class each and returning it from `app/container.py`.
 
 ## Jobs
 
-`python -m app.cli list-jobs` shows all 31. They run in-process (`WAMIWA_RUN_JOBS=true`) under a Redis
+`python -m app.cli list-jobs` shows all 35. They run in-process (`WAMIWA_RUN_JOBS=true`) under a Redis
 lock per job, so several API workers do not double-run them. To run them in a separate worker
 instead, set `WAMIWA_RUN_JOBS=false` on the API and run `python -m app.cli run-scheduler`. Run one by hand with
 `python -m app.cli run-job payouts.run_cycle`.

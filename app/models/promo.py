@@ -35,7 +35,7 @@ class PromoName(Model):
     normalized: Mapped[str] = mapped_column(String(80), index=True)
     status: Mapped[str] = mapped_column(String(10), default="pending", index=True)  # pending | approved | rejected
     plain_text_match: Mapped[bool] = mapped_column(Boolean, default=True)  # False: needs @, quotes or a cue word
-    # Artists: the profile found on Spotify, YouTube Music or Audiomack, used when no link was added.
+    # Artists: the profile found on Spotify, YouTube Music or Apple Music, used when no link was added.
     default_link_url: Mapped[str | None] = mapped_column(String(500))
     default_link_label: Mapped[str | None] = mapped_column(String(60))
     default_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

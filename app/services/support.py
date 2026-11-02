@@ -98,9 +98,12 @@ class SupportService(BaseService):
             {"ticket_id": ticket.id})
         return await self.get(admin, ticket_id)
 
-    async def staff_list(self, status: TicketStatus | None, cursor: str | None, limit: int) -> Page[dict]:
+    async def staff_list(self, status: TicketStatus | None, cursor: str | None, limit: int, *,
+                         newest_first: bool = False, subject_prefix: str | None = None) -> Page[dict]:
         where = [SupportTicket.status == status] if status else []
-        page = await self.repo(SupportTicket).page(*where, cursor=cursor, limit=limit, newest_first=False)
+        if subject_prefix:
+            where.append(SupportTicket.subject.startswith(subject_prefix))
+        page = await self.repo(SupportTicket).page(*where, cursor=cursor, limit=limit, newest_first=newest_first)
         now = self.now()
         return Page(items=[{**self.present(t), "overdue": t.first_responded_at is None and t.first_response_due_at < now}
                            for t in page.items], next_cursor=page.next_cursor)

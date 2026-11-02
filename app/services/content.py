@@ -1,4 +1,5 @@
 """Epic 2: posts, system-set labels, feeds, comments, agent tags, analytics and daily post ideas."""
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -14,7 +15,10 @@ from app.models import (
     Account, AgentIntegration, AgentProfile, AgentTag, Comment, CommentRating, CompanyProfile, ContentEdit, Contract,
     Follow, GeneratedVideo, Post, PostIdea, PostLike, UserProfile,
 )
+from app.infra.providers.base import ModerationResult
 from app.services.base import BaseService, Principal
+
+LINK = re.compile(r"https?://[^\s<>()\"']+", re.I)
 
 FREE_TAG_UNAVAILABLE = ("I am currently not available for free tag, you can check me out in the marketplace "
                         "to see how I can help you with this and more")
@@ -72,6 +76,39 @@ class PostService(BaseService):
             data["liked"] = liked
         return data
 
+    async def for_viewer(self, viewer: Account | None, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Per-viewer details on a list of presented posts: whether this person liked each one, and which brand a
+        sponsored (likeness) post is for. One query each, whatever the list's length."""
+        if not items:
+            return items
+        if viewer:
+            ids = [i["id"] for i in items]
+            liked = set((await self.db.execute(select(PostLike.post_id).where(
+                PostLike.post_id.in_(ids), PostLike.account_id == viewer.id))).scalars().all())
+            for item in items:
+                item["liked"] = item["id"] in liked
+        contract_ids = [i["sponsored_contract_id"] for i in items if i.get("sponsored_contract_id")]
+        if contract_ids:
+            contracts = await self.repo(Contract).by_ids(contract_ids)
+            brands = await self.repo(Account).by_ids([c.hirer_id for c in contracts.values()])
+            for item in items:
+                contract = contracts.get(item.get("sponsored_contract_id") or "")
+                brand = brands.get(contract.hirer_id) if contract else None
+                if brand:
+                    item["sponsored_by"] = {"id": brand.id, "handle": brand.handle, "name": brand.display_name}
+        return items
+
+    async def review_text(self, text: str) -> ModerationResult:
+        """Moderation plus a scam check of every link in the text (posts and comments, new or edited). A
+        suspicious link holds the content for review, as WA-11 does for Wamiwa Agent links."""
+        moderation = await self.providers.moderation.moderate_text(text)
+        if moderation.flagged:
+            return moderation
+        for url in list(dict.fromkeys(LINK.findall(text or "")))[:10]:
+            if (await self.providers.link_safety.check(url.rstrip(".,!?;:"))).suspicious:
+                return ModerationResult(True, moderation.vulgar, ("scam_link",), f"Suspected scam link: {url}")
+        return moderation
+
     async def _niche_of(self, account: Account) -> str | None:
         if account.is_company:
             company = await self.svc.access.company(account.id)
@@ -106,7 +143,7 @@ class PostService(BaseService):
                 ai_generated, mislabeled = True, True  # API-01: unlabeled AI content gets labeled when detected
 
         label, badge = LabelPolicy.for_post(author, ai_generated=ai_generated, likeness=bool(likeness_contract_id))
-        moderation = await self.providers.moderation.moderate_text(text) if text else None
+        moderation = await self.svc.posts.review_text(text) if text else None
         tagged: list[str] = []
         if tagged_handles:
             handles = [h.lstrip("@").lower() for h in tagged_handles][:10]
@@ -175,6 +212,7 @@ class PostService(BaseService):
             liked = await self.repo(PostLike).exists(PostLike.post_id == post.id, PostLike.account_id == viewer.id)
             await self.svc.feed.record_impressions([post.id], viewer)
         data = self.present(post, author, liked)
+        await self.for_viewer(viewer, [data])
         await self.svc.promos.decorate(viewer, [data], "post")
         return data
 
@@ -185,7 +223,11 @@ class PostService(BaseService):
         if not viewer or viewer.id != author_id:
             where.append(Post.moderation_status == ModerationStatus.VISIBLE)
         page = await self.repo(Post).page(*where, cursor=cursor, limit=limit)
-        return Page(items=[self.present(p) for p in page.items], next_cursor=page.next_cursor)
+        author = await self.repo(Account).get(author_id)
+        items = await self.for_viewer(viewer, [self.present(p, author) for p in page.items])
+        if viewer:
+            await self.svc.promos.decorate(viewer, items, "post")
+        return Page(items=items, next_cursor=page.next_cursor)
 
     # --- FD-08 edit and delete -------------------------------------------------------------
     async def manages(self, account: Account, author_id: str) -> bool:
@@ -242,7 +284,7 @@ class PostService(BaseService):
         await self.repo(ContentEdit).add(ContentEdit(
             target_type="post", target_id=post.id, editor_id=account.id, previous_text=post.text))
         post.text, post.edited_at = text, self.now()
-        moderation = await self.providers.moderation.moderate_text(text) if text else None
+        moderation = await self.svc.posts.review_text(text) if text else None
         if moderation and moderation.flagged:
             post.moderation_status = ModerationStatus.FLAGGED
             await self.svc.queues.enqueue(Queue.REPORTS, "post", post.id, subject_account_id=account.id,
@@ -333,6 +375,7 @@ class FeedService(BaseService):
             raw = await self.cache.get_or_set(key, self.s.cache_ttl_feed, lambda: self._query(tab, cursor, limit, None))
         items = [dict(item) for item in raw["items"] if item["author_id"] not in hidden]
         await self.record_impressions([item["id"] for item in items], viewer)
+        await self.svc.posts.for_viewer(viewer, items)
         await self.svc.promos.decorate(viewer, items, "post")
         return Page(items=items, next_cursor=raw["next_cursor"]), tab
 
@@ -435,7 +478,7 @@ class CommentService(BaseService):
             on_behalf_of = None
 
         mentioned_agents = [] if label != Label.HUMAN else await self._mentioned_agents(text, post)
-        moderation = await self.providers.moderation.moderate_text(text)
+        moderation = await self.svc.posts.review_text(text)
         if moderation.flagged and principal.kind == "company_key":
             # API-02: a reply that fails moderation is blocked and the API returns the reason.
             raise Unprocessable("Reply blocked by moderation", code="moderation_blocked", reason=moderation.reason)
@@ -664,7 +707,7 @@ class CommentService(BaseService):
         await self.repo(ContentEdit).add(ContentEdit(
             target_type="comment", target_id=comment.id, editor_id=account.id, previous_text=comment.text))
         comment.text, comment.edited_at = text, self.now()
-        moderation = await self.providers.moderation.moderate_text(text)
+        moderation = await self.svc.posts.review_text(text)
         comment.flagged_vulgar, comment.moderation_reason = moderation.vulgar, moderation.reason
         if moderation.flagged:
             comment.moderation_status = ModerationStatus.FLAGGED

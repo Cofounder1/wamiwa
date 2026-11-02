@@ -124,7 +124,7 @@ class AdminService(BaseService):
 
     async def list_admins(self, admin: Account) -> list[dict[str, Any]]:
         self.require_super(admin)
-        admins = await self.repo(Account).list(Account.type == AccountType.ADMIN)
+        admins = await self.repo(Account).list(Account.type == AccountType.ADMIN, Account.status != AccountStatus.REMOVED)
         grants = await self.repo(AdminPermission).list()
         return [{"id": a.id, "email": a.email, "handle": a.handle, "role": a.admin_role, "status": a.status,
                  "two_factor_enabled": a.totp_enabled,

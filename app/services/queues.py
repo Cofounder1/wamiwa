@@ -42,7 +42,7 @@ class AuditService(BaseService):
         if actor_id:
             where.append(AuditLog.actor_id == actor_id)
         if action:
-            where.append(AuditLog.action == action)
+            where.append(AuditLog.action.ilike(f"%{action}%"))  # "suspend" finds account.suspend
         if target_id:
             where.append(AuditLog.target_id == target_id)
         return await self.repo(AuditLog).page(*where, cursor=cursor, limit=limit)
@@ -141,6 +141,41 @@ class QueueService(BaseService):
             raise Forbidden("Only the admin who claimed this item can release it")
         item.claimed_by, item.claimed_at = None, None
         return item
+
+    # What each kind of item is about, so the reviewer sees it in full (AQ-02).
+    TARGETS = {
+        "identity_document": ("IdentityVerification", ("document_type", "document_ref", "selfie_ref", "liveness_result",
+                                                        "verified_name", "verified_dob", "failure_reason")),
+        "identity_verification": ("IdentityVerification", ("document_type", "document_ref", "selfie_ref", "liveness_result",
+                                                            "verified_name", "verified_dob", "failure_reason")),
+        "duplicate_identity": ("IdentityVerification", ("document_type", "verified_name", "verified_dob", "failure_reason")),
+        "script": ("Script", ("contract_id", "version", "text", "screening_result", "status")),
+        "report": ("Report", ("reporter_id", "target_type", "target_id", "target_account_id", "reason", "details", "status")),
+        "payout": ("Payout", ("account_id", "amount", "currency", "status", "manual", "reason", "needs_second_approval")),
+        "promo_link": ("PromoLink", ("url", "label", "keywords", "flagged", "flag_reason", "reports")),
+        "promo_name": ("PromoName", ("name", "status", "plain_text_match")),
+    }
+
+    async def target_detail(self, item: QueueItem) -> dict[str, Any] | None:
+        spec = self.TARGETS.get(item.target_type)
+        if spec is None:
+            return None
+        import app.models as models
+
+        record = await self.repo(getattr(models, spec[0])).get(item.target_id)
+        if record is None:
+            return None
+        detail = {}
+        for field in spec[1]:
+            value = getattr(record, field)
+            detail[field] = value.isoformat() if hasattr(value, "isoformat") else value
+        if item.target_type == "script":
+            contract = await self.repo(models.Contract).get(record.contract_id)
+            if contract:
+                detail["contract"] = {"title": contract.title, "price_cents": contract.price_cents,
+                                      "hirer_id": contract.hirer_id, "earner_id": contract.earner_id,
+                                      "requires_guardian": contract.requires_guardian}
+        return detail
 
     async def decide(self, admin: Account, item_id: str, decision: QueueDecision, reason: str,
                      payload: dict[str, Any] | None = None) -> QueueItem:

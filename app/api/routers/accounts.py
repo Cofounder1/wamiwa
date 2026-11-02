@@ -1,7 +1,8 @@
 """Own account: profile, settings, guardians, notifications, blocks, verification and deletion."""
+from datetime import timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import Active, Anonymous, Any_, Services, ok, ok_page
@@ -62,16 +63,23 @@ class MarkReadIn(BaseModel):
 
 class IdentityIn(BaseModel):
     document_type: DocumentType
-    document_ref: str = Ref
-    selfie_ref: str = Ref
-    liveness_ref: str | None = Field(default=None, max_length=255, description="The live camera clip")
+    id_number: str | None = Field(default=None, max_length=32, description=(
+        "Nigerian NIN or driver's licence number, looked up with YouVerify. Not needed for a passport or an ID "
+        "from outside Nigeria, which is sent as document_ref instead"))
+    document_ref: str | None = Field(default=None, max_length=255, description="Photo of the passport or ID")
+    liveness_session_id: str | None = Field(default=None, max_length=128, description=(
+        "YouVerify's live check: the session_id from POST /verification/identity/live-check"))
+    selfie_ref: str | None = Field(default=None, max_length=255, description="Wamiwa's camera check: a live frame")
+    liveness_ref: str | None = Field(default=None, max_length=255, description="Wamiwa's camera check: the clip")
 
 
 class BankIn(BaseModel):
     bank_code: str = Field(min_length=2, max_length=16)
-    account_number: str = Field(min_length=6, max_length=20, pattern=r"^\d+$")
+    account_number: str = Field(min_length=5, max_length=40, description="Account number, or IBAN for a foreign bank")
     account_name: str = Field(min_length=2, max_length=160)
     totp_code: str | None = None
+    details: dict[str, str] | None = Field(default=None, description=(
+        "Outside Nigeria: bank_name, swift_code or routing_number, beneficiary_address, beneficiary_country"))
 
 
 class SocialIn(BaseModel):
@@ -99,9 +107,19 @@ class AppealIn(BaseModel):
 
 
 # --- profile and settings ---------------------------------------------------------------------
-@router.get("/regions", dependencies=[Anonymous])
-async def list_regions():
+# These two are asked for on every page load and are cheap, unchanging data, so they don't count against the
+# per-address budget: many people share one address on mobile networks, and the site shouldn't break for them.
+@router.get("/platform/status")
+async def platform_status(svc: Services, response: Response):
+    """Public. `test_mode`: payments use test keys and no real money moves; the site shows a banner."""
+    response.headers["Cache-Control"] = "public, max-age=60"
+    return ok(await svc.launch.status())
+
+
+@router.get("/regions")
+async def list_regions(response: Response):
     """Every country and territory that can be chosen as a region or target region."""
+    response.headers["Cache-Control"] = "public, max-age=86400"
     return ok(regions.options())
 
 
@@ -134,7 +152,10 @@ async def verify_phone(body: CodeIn, p: Active, svc: Services):
 # --- deletion, export, appeal (DL-01, AD-02) -----------------------------------------------------
 @router.get("/accounts/me/deletion")
 async def deletion_blockers(p: Any_, svc: Services):
-    return ok({"blockers": await svc.deletion.blockers(p.account), "status": p.account.status})
+    a = p.account
+    delete_on = (a.deletion_requested_at + timedelta(days=svc.deletion.s.deletion_grace_days)).isoformat() \
+        if a.status == "pending_deletion" and a.deletion_requested_at else None
+    return ok({"blockers": await svc.deletion.blockers(a), "status": a.status, "delete_on": delete_on})
 
 
 @router.post("/accounts/me/deletion")
@@ -278,12 +299,21 @@ async def unblock(account_id: str, p: Active, svc: Services):
 
 
 # --- verification (ON-05 to ON-08) ---------------------------------------------------------------------------
+@router.post("/verification/identity/live-check")
+async def start_live_check(p: Active, svc: Services):
+    """ON-05 step 1. `provider: "youverify"`: run YouVerify's liveness SDK with the session_id, session_token and
+    public_merchant_key given, then send the session_id with the ID. `provider: "camera"`: use Wamiwa's own camera
+    check and send selfie_ref and liveness_ref."""
+    return ok(await svc.identity.start_live_check(p.account))
+
+
 @router.post("/verification/identity")
 async def submit_identity(body: IdentityIn, p: Active, svc: Services):
     await svc.uploads.claim(p.account, [body.document_ref], {"id_document"})
     await svc.uploads.claim(p.account, [body.selfie_ref, body.liveness_ref], {"liveness"})  # taken live, never a saved photo
     return ok(await svc.identity.submit(p.account, body.document_type, body.document_ref, body.selfie_ref,
-                                        body.liveness_ref))
+                                        body.liveness_ref, id_number=body.id_number,
+                                        liveness_session_id=body.liveness_session_id))
 
 
 @router.get("/verification/identity")
@@ -294,7 +324,7 @@ async def identity_status(p: Any_, svc: Services):
 @router.put("/verification/bank-account")
 async def save_bank_account(body: BankIn, p: Active, svc: Services):
     return ok(await svc.bank_accounts.save(p.account, body.bank_code, body.account_number, body.account_name,
-                                           body.totp_code))
+                                           body.totp_code, body.details))
 
 
 @router.get("/verification/bank-account")

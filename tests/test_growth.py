@@ -37,8 +37,9 @@ async def test_pro_tier_upgrade_mid_period_and_downgrade_at_renewal(api):
 
     # Halfway through the month, upgrading costs only the difference for the days left ($6 x 1/2).
     api.clock.advance(days=15)
-    charges = api.infra.providers.payments.charges
+    charges = api.infra.providers.payments.main.charges
     before = set(charges)
+    assert (await api.ok("GET", "/subscriptions/upgrade-quote", user))["amount_cents"] == 3_00  # what checkout opens for
     upgraded = await api.ok("PATCH", "/subscriptions", user, json={"tier": "pro", "payment_method": PAY})
     assert upgraded["tier"] == "pro"
     [new_charge] = [charges[ref] for ref in set(charges) - before]

@@ -242,7 +242,8 @@ def make_settings(**overrides) -> Settings:
         allow_private_webhook_urls=True, anonymous_requests_per_minute=10_000, human_reads_per_minute=10_000,
         human_writes_per_minute=10_000, machine_reads_per_minute=10_000, machine_writes_per_minute=10_000,
         logins_per_hour=1000, access_token_ttl_seconds=10 * 365 * 86400)
-    return Settings(**(defaults | overrides))
+    # Never .env: real keys there (PayPal, Flutterwave, Resend) would make tests call real providers.
+    return Settings(_env_file=None, **(defaults | overrides))
 
 
 async def build_api(**overrides):

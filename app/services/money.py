@@ -1,9 +1,9 @@
 """Refunds and charge reversals that are safe against failed requests and retries."""
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.core.enums import NotificationType
-from app.models import MoneyMovement
+from app.models import Account, EscrowTransaction, MoneyMovement, Payment
 from app.services.base import BaseService, ServiceContext
 
 log = logging.getLogger("wamiwa.money")
@@ -89,9 +89,75 @@ class MoneyMovementService(BaseService):
         """Refunds decided but not yet made: the provider still holds that money."""
         return await self.repo(MoneyMovement).sum(
             MoneyMovement.amount, MoneyMovement.status == "pending", MoneyMovement.currency == currency,
-            MoneyMovement.kind == "refund")
+            MoneyMovement.kind == "refund",
+            ~(MoneyMovement.charge_ref.like("flwusd:%") | MoneyMovement.charge_ref.like("paypal:%")))
 
     async def notify_refund(self, account_id: str, amount: int, currency: str, data: dict | None = None) -> None:
         await self.svc.notifications.notify(
             account_id, NotificationType.PAYMENT, "Refund on its way",
             f"{amount / 100:,.2f} {currency} will reach you within {self.s.refund_working_days} working days.", data)
+
+
+class StrayPaymentService(BaseService):
+    """With Flutterwave the person pays first and the app then asks Wamiwa for what they paid for. If that request
+    is refused, or never arrives (a closed browser), the payment would sit at Flutterwave with no record and no
+    refund. This job finds such payments and gives them back in full (PayPal needs none: nothing is taken until
+    Wamiwa captures it)."""
+
+    GRACE = timedelta(minutes=30)  # long enough for a slow checkout to reach Wamiwa
+    LOOKBACK_DAYS = 3
+
+    async def _flutterwave(self):
+        payments = self.providers.payments
+        if hasattr(payments, "current"):  # the live site's test/live switch
+            payments = await payments.current()
+        main = getattr(payments, "main", payments)
+        return main if hasattr(main, "successful_transactions") else None
+
+    async def refund_unrecorded(self) -> int:
+        flutterwave = await self._flutterwave()
+        if flutterwave is None:
+            return 0
+        now = self.now()
+        transactions = await flutterwave.successful_transactions(
+            (now - timedelta(days=self.LOOKBACK_DAYS)).date().isoformat(), now.date().isoformat())
+        refunded = 0
+        for t in transactions:
+            if not t["tx_ref"].startswith("wmw-") or t["id"] is None:
+                continue  # not a Wamiwa checkout (e.g. a payment made in Flutterwave's dashboard)
+            try:
+                paid_at = datetime.fromisoformat(str(t["created_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if now - paid_at < self.GRACE:
+                continue
+            refs = (f"flw:{t['id']}", f"flwusd:{t['id']}@%")
+            recorded = any([
+                await self.repo(Payment).exists(Payment.provider_ref.like(refs[1]) | (Payment.provider_ref == refs[0])),
+                await self.repo(EscrowTransaction).exists(
+                    EscrowTransaction.provider_ref.like(refs[1]) | (EscrowTransaction.provider_ref == refs[0])),
+                await self.repo(MoneyMovement).exists(MoneyMovement.reference == f"stray_{t['id']}"),
+            ])
+            if recorded:
+                continue
+            result = await flutterwave.refund_in_full(t["id"])
+            amount = int(round(float(t["amount"] or 0) * 100))
+            await self.repo(MoneyMovement).add(MoneyMovement(
+                kind="stray", reference=f"stray_{t['id']}", charge_ref=refs[0], amount=amount,
+                currency=t["currency"] or self.s.local_currency, status="succeeded" if result.succeeded else "failed",
+                provider_ref=result.provider_ref, attempts=1, executed_at=now if result.succeeded else None,
+                last_error=result.failure_reason))
+            account_id = t["tx_ref"].removeprefix("wmw-").split("-", 1)[0]
+            if result.succeeded:
+                refunded += 1
+                if await self.repo(Account).exists(Account.id == account_id):
+                    await self.svc.notifications.notify(
+                        account_id, NotificationType.PAYMENT, "Payment refunded",
+                        f"We couldn't complete what your payment of {amount / 100:,.2f} {t['currency']} was for, so it "
+                        "has been refunded in full. It reaches you within 5 working days.")
+            else:
+                await self.svc.admin.alert_admins(
+                    "A payment could not be refunded automatically",
+                    f"Flutterwave transaction {t['id']} ({amount / 100:,.2f} {t['currency']}) paid for nothing on "
+                    f"Wamiwa, and the refund failed: {result.failure_reason}. Refund it from the Flutterwave dashboard.")
+        return refunded

@@ -5,6 +5,8 @@
     python -m app.cli list-jobs
     python -m app.cli run-scheduler                         # runs every job on its interval until stopped
     python -m app.cli seed-demo                             # development only: demo accounts for the frontend
+    python -m app.cli reset-test-data --database-url URL [--confirm wamiwa.site]
+                                                            # before launch only: clear test data (see app/reset.py)
 """
 import asyncio
 import getpass
@@ -61,6 +63,34 @@ async def seed_demo() -> None:
         print(f"  {email:<24} {secret}")
 
 
+async def reset_test_data(database_url: str, confirm: str | None) -> None:
+    from urllib.parse import urlparse
+
+    from app.reset import AlreadyLive, run
+
+    base = get_settings()
+    settings = base.model_copy(update={"database_url": database_url})
+    site = urlparse(base.public_base_url).hostname or "wamiwa.site"
+    execute = confirm == site
+    if confirm is not None and not execute:
+        raise SystemExit(f"--confirm must be the site's name: {site}")
+    try:
+        result = await run(settings, execute=execute)
+    except AlreadyLive as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Kept: {len(result.kept_accounts)} accounts (admins and the Wamiwa Agent), the category maps and the audit log.")
+    if not result.total:
+        print("Nothing to delete.")
+        return
+    print(f"{'Deleted' if execute else 'Would delete'} {result.total} rows:")
+    for table, count in sorted(result.deletions.items()):
+        print(f"  {table:34s} {count}")
+    if not execute:
+        print(f"\nNothing was deleted. To delete these, run again with --confirm {site}")
+    else:
+        print("\nDone. Next: press Go live in the admin panel (Super Admin) to switch payments to the live keys.")
+
+
 def main(argv: list[str]) -> None:
     if len(argv) == 3 and argv[0] == "create-super-admin":
         asyncio.run(create_super_admin(argv[1], argv[2]))
@@ -71,6 +101,11 @@ def main(argv: list[str]) -> None:
             asyncio.run(run_scheduler())
         except KeyboardInterrupt:
             pass
+    elif argv and argv[0] == "reset-test-data":
+        options = dict(zip(argv[1::2], argv[2::2]))
+        if "--database-url" not in options or len(argv) % 2 == 0:
+            raise SystemExit("reset-test-data needs --database-url <the database to clear> (no default, on purpose)")
+        asyncio.run(reset_test_data(options["--database-url"], options.get("--confirm")))
     elif argv == ["seed-demo"]:
         asyncio.run(seed_demo())
     elif argv == ["list-jobs"]:

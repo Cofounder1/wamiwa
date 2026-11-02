@@ -267,6 +267,7 @@ class GrowthService(BaseService):
             item["from_business"] = author.type == AccountType.COMPANY
             items.append(item)
         await self.svc.feed.record_impressions([i["id"] for i in items], viewer)
+        await self.svc.posts.for_viewer(viewer, items)
         await self.svc.promos.decorate(viewer, items, "post")
         return {"items": items, "based_on": {"topics": list(interests["terms"])[:10],
                                              "categories": list(interests["categories"])}}

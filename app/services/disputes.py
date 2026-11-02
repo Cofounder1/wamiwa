@@ -1,4 +1,5 @@
 """PY-04 disputes and appeals, and Epic 8 subscriptions."""
+import math
 from datetime import timedelta
 from typing import Any
 
@@ -40,6 +41,10 @@ class DisputeService(BaseService):
         return dispute, contract
 
     async def open(self, account: Account, contract_id: str, reason: str, is_misuse_claim: bool) -> dict[str, Any]:
+        contract_check = await self.repo(Contract).get(contract_id)
+        if contract_check is not None and contract_check.price_cents == 0:
+            raise Unprocessable("Disputes cover cash, and this deal has none. To end the equity agreement, ask Wamiwa "
+                                "to cancel it from the contract.", code="no_cash_to_dispute")
         contract = await self.repo(Contract).get(contract_id)
         if contract is None or account.id not in (contract.hirer_id, contract.earner_id):
             raise NotFound("Contract not found")
@@ -274,8 +279,14 @@ class SubscriptionService(BaseService):
             if subscription.tier != tier:
                 return await self.change_tier(account, tier, payment_method)
             raise Conflict("You are already subscribed", code="already_subscribed")
+        if subscription and subscription.renews_at > self.now() and subscription.tier != tier:
+            # Cancelled but still paid for: renewing into another tier would hand over the new tier for the days
+            # already paid at the old price. Renew the same plan, then change it (the upgrade charges the difference).
+            raise Conflict("Renew your current plan first, then change it", code="renew_same_tier_first",
+                           tier=subscription.tier)
         price, days = self._terms(period, tier)
-        await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, price, payment_method)
+        payment = await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, price, payment_method)
+        payment_method = self.svc.payment.renewal_method(payment, payment_method)
         if subscription is None:
             subscription = await self.repo(Subscription).add(Subscription(
                 account_id=account.id, period=period, started_at=self.now(), renews_at=self.now(),
@@ -288,6 +299,24 @@ class SubscriptionService(BaseService):
         await self.svc.profiles.invalidate(account)  # the subscriber badge shows at once
         return self.present(subscription)
 
+    def _upgrade_cents(self, subscription: Subscription) -> int:
+        """Moving up to Pro mid-period costs the difference for the days left."""
+        period = BillingPeriod(subscription.period)
+        new_price, days = self._terms(period, "pro")
+        old_price, _ = self._terms(period, "standard")
+        # Whole days left (today counts), so the quote and the charge a few minutes later agree to the cent.
+        days_left = math.ceil((subscription.renews_at - self.now()).total_seconds() / 86400)
+        return max(1, round((new_price - old_price) * min(1.0, days_left / days)))
+
+    async def upgrade_quote(self, account: Account) -> dict[str, Any]:
+        """What upgrading to Pro costs right now, so the checkout can be opened for exactly that amount."""
+        subscription = await self.repo(Subscription).first(Subscription.account_id == account.id)
+        if (subscription is None or subscription.status != SubscriptionStatus.ACTIVE
+                or subscription.renews_at <= self.now() or subscription.tier == "pro"):
+            raise Conflict("There's nothing to upgrade", code="nothing_to_upgrade")
+        return {"tier": "pro", "amount_cents": self._upgrade_cents(subscription),
+                "until": subscription.renews_at.isoformat()}
+
     async def change_tier(self, account: Account, tier: str, payment_method: str) -> dict[str, Any]:
         """Upgrading starts now and costs only the difference for the days left; downgrading takes
         effect at the next renewal, so nothing already paid for is lost."""
@@ -299,14 +328,11 @@ class SubscriptionService(BaseService):
         if tier == subscription.tier:
             subscription.next_tier = None  # undo a pending downgrade
             return self.present(subscription)
-        period = BillingPeriod(subscription.period)
         if tier == "pro":
-            new_price, days = self._terms(period, "pro")
-            old_price, _ = self._terms(period, "standard")
-            left = (subscription.renews_at - self.now()).total_seconds() / (days * 86400)
-            difference = max(1, round((new_price - old_price) * min(1.0, left)))
-            await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION, difference, payment_method)
-            subscription.tier, subscription.next_tier, subscription.payment_method = "pro", None, payment_method
+            payment = await self.svc.payment.charge(account, PaymentPurpose.SUBSCRIPTION,
+                                                    self._upgrade_cents(subscription), payment_method)
+            subscription.tier, subscription.next_tier = "pro", None
+            subscription.payment_method = self.svc.payment.renewal_method(payment, payment_method)
         else:
             subscription.next_tier = tier
         return self.present(subscription)

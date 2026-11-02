@@ -1,5 +1,6 @@
 """Epic 5: likeness pages, pricing, script flow, consent, term handling and guardian confirmation."""
 import hashlib
+import json
 import math
 from datetime import timedelta
 from typing import Any
@@ -14,6 +15,7 @@ from app.core.enums import (
 from app.core.exceptions import Conflict, Forbidden, NotFound, Unprocessable
 from app.core.security import SecretFactory
 from app.core.utils import Cursor, FeeBreakdown, Page
+from app.infra.providers.africastalking import VoiceXml
 from app.models import (
     Account, Contract, GeneratedVideo, GuardianConfirmation, LikenessAsset, LikenessConsent, LikenessPage,
     Post, QueueItem, Script, ScriptChangeRequest, UserProfile,
@@ -349,12 +351,14 @@ class LikenessContractService(BaseService):
         if exclusivity:
             # The exclusivity price is quoted against image-only; keep its premium when voice is added.
             price += page.exclusivity_price_cents - page.price_image_cents
+        # One payment covers the likeness price and the video production (LK-10): a checkout pays one exact amount.
         contract = await self.svc.contracts.build(
             type=ContractType.LIKENESS, hirer=brand, earner_id=account.id, price_cents=price,
             payment_method=payment_method, title=f"Likeness hire by {company.business_name}", with_voice=with_voice,
             exclusivity=exclusivity, influencer_must_post=influencer_must_post, takedown_days=takedown_days,
-            no_ai_replies=no_ai_replies, requires_guardian=profile.is_minor)
-        await self.svc.videos.open_production(contract, brand, video_seconds, use_plan, payment_method)
+            no_ai_replies=no_ai_replies, requires_guardian=profile.is_minor,
+            also_charge_cents=self.svc.videos.production_charge_cents(video_seconds, use_plan))
+        await self.svc.videos.open_production(contract, brand, video_seconds, use_plan)
         await self._add_script(contract, script, always_review=profile.is_minor)
         return await self.detail(brand, contract.id)
 
@@ -632,13 +636,19 @@ class GuardianConfirmationService(BaseService):
         script = (f"This is Wamiwa. {brand.business_name if brand else 'A company'} wants to hire your child for "
                   f"{contract.price_cents / 100:,.2f} US dollars. Contract length: {length}. Enter the one-time code "
                   "we sent to this number, then press 1 to approve or 2 to decline.")
-        phone, reference = guardian.phone, confirmation.id
+        phone, reference, calls = guardian.phone, confirmation.id, GuardianCallService(self.ctx)
 
         async def call() -> None:
             await self.providers.sms.send(phone, f"Wamiwa confirmation code: {code}")
-            await self.providers.voice.place_confirmation_call(to=phone, reference=reference, script=script)
+            call_id = await self.providers.voice.place_confirmation_call(to=phone, reference=reference, script=script)
+            await calls.remember(call_id, reference, script)
 
         self.uow.on_commit(call)
+
+    async def call_code_matches(self, reference: str, otp: str) -> bool:
+        confirmation = await self.repo(GuardianConfirmation).get(reference)
+        return bool(confirmation and confirmation.result == GuardianResult.AWAITING_CALL and confirmation.otp_hash
+                    and self.infra.hasher.matches(otp, confirmation.otp_hash))
 
     async def handle_call_result(self, reference: str, *, answered: bool, otp: str | None, digit: str | None,
                                  recording_ref: str | None, call_id: str | None) -> dict[str, Any]:
@@ -715,3 +725,72 @@ class GuardianConfirmationService(BaseService):
     async def minor_contracts(self, guardian: Account, minor_id: str, cursor: str | None, limit: int) -> Page[dict]:
         await self.svc.access.require_guardian_of(guardian.id, minor_id)
         return await self.svc.contracts.list_for(minor_id, role="earner", type=None, status=None, cursor=cursor, limit=limit)
+
+
+class GuardianCallService(BaseService):
+    """LK-09 confirmation call, one step at a time, for a provider that asks Wamiwa what to do while the call is live
+    (Africa's Talking). The guardian hears the contract, enters the code sent by SMS, presses 1 or 2, then says
+    their name and decision after a beep. That recording is the call's record; the decision counts only once it
+    arrives. A missed or unfinished call changes nothing, and the retry schedule carries on."""
+
+    STATE_TTL = 60 * 60
+    CODE_TRIES = 2  # per call
+    PROMPTS = 2  # times a choice or the recording is asked for before the call ends
+
+    def _key(self, call_id: str) -> str:
+        return f"voicecall:{call_id}"
+
+    async def remember(self, call_id: str, reference: str, script: str) -> None:
+        await self.kv.set(self._key(call_id), json.dumps({"reference": reference, "script": script, "step": "answered",
+                                                          "tries": 0}), self.STATE_TTL)
+
+    async def step(self, call_id: str, *, active: bool, digits: str | None, recording_url: str | None) -> str:
+        x = VoiceXml
+        raw = await self.kv.get(self._key(call_id))
+        if raw is None:
+            return x.response()  # not a call Wamiwa placed, or one already finished
+        state = json.loads(raw)
+        confirmations = self.svc.guardian_confirmations
+        if not active:  # the call ended before a decision was recorded
+            await self.kv.delete(self._key(call_id))
+            await confirmations.handle_call_result(state["reference"], answered=False, otp=None, digit=None,
+                                                   recording_ref=None, call_id=call_id)
+            return x.response()
+        goodbye = x.say("We will call you again. You can also approve or decline in the Wamiwa app. Goodbye.")
+        ask_code = x.get_digits("Please enter the code we sent to this number by text message, then press hash.",
+                                num_digits=self.s.otp_length, then=goodbye)
+        ask_choice = x.get_digits("Press 1 to approve the contract, or 2 to decline it.", num_digits=1, then=goodbye)
+
+        if state["step"] == "answered":  # the guardian just picked up
+            state["step"] = "code"
+            answer = x.response(x.say(state["script"]), ask_code)
+        elif state["step"] == "code":
+            if digits and await confirmations.call_code_matches(state["reference"], digits):
+                state.update(step="choice", otp=digits, tries=0)
+                answer = x.response(ask_choice)
+            else:
+                state["tries"] += 1
+                answer = (x.response(x.say("That code is not correct."), ask_code) if state["tries"] < self.CODE_TRIES
+                          else x.response(x.say("That code is not correct."), goodbye))
+        elif state["step"] == "choice":
+            if digits in ("1", "2"):
+                decision = "I approve" if digits == "1" else "I decline"
+                state.update(step="record", digit=digits, tries=0)
+                answer = x.response(x.record(f"After the beep, say your full name and the words: {decision}. "
+                                             "Then press hash."))
+            else:
+                state["tries"] += 1
+                answer = x.response(ask_choice) if state["tries"] < self.PROMPTS else x.response(goodbye)
+        elif recording_url:  # step "record": the decision counts now that it is recorded
+            await self.kv.delete(self._key(call_id))
+            await confirmations.handle_call_result(state["reference"], answered=True, otp=state["otp"],
+                                                   digit=state["digit"], recording_ref=recording_url, call_id=call_id)
+            done = "approved" if state["digit"] == "1" else "declined"
+            return x.response(x.say(f"Thank you. The contract is {done}. Goodbye."))
+        else:
+            state["tries"] += 1
+            answer = (x.response(x.say("We did not hear you."), x.record("After the beep, say your full name and your "
+                                                                          "decision. Then press hash."))
+                      if state["tries"] < self.PROMPTS else x.response(goodbye))
+        await self.kv.set(self._key(call_id), json.dumps(state), self.STATE_TTL)
+        return answer

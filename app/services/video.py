@@ -51,6 +51,7 @@ class VideoPlanService(BaseService):
         if existing and existing.active and not existing.cancel_at_period_end:
             raise Conflict("You already have an active plan", code="plan_active")
         payment = await self.svc.payment.charge(company, PaymentPurpose.VIDEO_PLAN, price, payment_method)
+        payment_method = self.svc.payment.renewal_method(payment, payment_method)
         if existing is None:
             existing = await self.repo(BrandVideoPlan).add(BrandVideoPlan(
                 company_account_id=company.id, plan=plan, renews_at=self.now(), payment_method=payment_method))
@@ -148,21 +149,28 @@ class VideoGenerationService(BaseService):
             if plan is None or not plan.active or plan.videos_left + plan.rollover_left <= 0:
                 raise Conflict("Your plan has no videos left", code="plan_exhausted")
 
-    async def open_production(self, contract: Contract, brand: Account, seconds: int, use_plan: bool,
-                              payment_method: str) -> VideoProduction:
-        """Video production is charged on top of the influencer's likeness price."""
+    def production_charge_cents(self, seconds: int, use_plan: bool) -> int:
+        """What the brand pays for production on top of the likeness price: a plan video covers the first
+        60 seconds, so with a plan only the extra length is charged."""
+        seconds = seconds or self.s.video_default_seconds
+        extra_cents = self.production_price_cents(seconds) - self.s.video_price_cents
+        return extra_cents if use_plan else self.s.video_price_cents + extra_cents
+
+    async def open_production(self, contract: Contract, brand: Account, seconds: int, use_plan: bool) -> VideoProduction:
+        """Video production is charged on top of the influencer's likeness price, in the same payment as the
+        escrow (`production_charge_cents` was added to it); here that share is recorded and a plan video used."""
         seconds = seconds or self.s.video_default_seconds
         if seconds < 5 or seconds > 600:
             raise Unprocessable("Video length must be between 5 seconds and 10 minutes", code="invalid_length")
-        extra_cents = self.production_price_cents(seconds) - self.s.video_price_cents
         by_plan = use_plan and await self.svc.video_plans.consume(brand.id)
         if use_plan and not by_plan:
             raise Conflict("Your plan has no videos left", code="plan_exhausted")
-        charge_cents = extra_cents if by_plan else self.s.video_price_cents + extra_cents
+        charge_cents = self.production_charge_cents(seconds, use_plan)
         payment = None
         if charge_cents > 0:
-            payment = await self.svc.payment.charge(brand, PaymentPurpose.VIDEO_PRODUCTION, charge_cents,
-                                                    payment_method, reference_id=contract.id)
+            escrow = await self.svc.escrow.for_contract(contract.id)
+            payment = await self.svc.payment.record_share(brand, PaymentPurpose.VIDEO_PRODUCTION, charge_cents,
+                                                          escrow, reference_id=contract.id)
         return await self.repo(VideoProduction).add(VideoProduction(
             contract_id=contract.id, seconds=seconds, drafts_left=self.s.video_drafts_included,
             finals_left=self.s.video_finals_included, funded_by_plan=by_plan,
@@ -455,7 +463,8 @@ class VideoGenerationService(BaseService):
                 plan.cancel_at_period_end = False
                 return self._present_plan(plan)
             raise Conflict("You already have the AI video plan", code="already_subscribed")
-        await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO_PLAN, self.s.ai_video_plan_cents, payment_method)
+        payment = await self.svc.payment.charge(account, PaymentPurpose.AI_VIDEO_PLAN, self.s.ai_video_plan_cents, payment_method)
+        payment_method = self.svc.payment.renewal_method(payment, payment_method)
         if plan is None:
             plan = await self.repo(CreatorVideoPlan).add(CreatorVideoPlan(
                 account_id=account.id, renews_at=self.now(), payment_method=payment_method))

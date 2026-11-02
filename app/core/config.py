@@ -4,7 +4,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -23,6 +23,29 @@ class Settings(BaseSettings):
     database_schema: str | None = None  # Postgres only: keep the tables in a schema other than "public"
     redis_url: str | None = None  # falls back to an in-process store when unset (single worker only)
     run_jobs: bool = True
+    # Production only: keep the payment and ID stand-ins (which approve everything). Never on the public site.
+    allow_stand_in_providers: bool = False
+    # PY-05 Flutterwave, for payments and all payouts. From Flutterwave's dashboard: Settings > API keys.
+    # Test keys (FLWSECK_TEST-..., FLWPUBK_TEST-...) use test money; live keys charge real cards.
+    flutterwave_secret_key: str | None = Field(default=None, validation_alias=AliasChoices(
+        "WAMIWA_FLUTTERWAVE_SECRET_KEY", "WAMIWA_FLUTTERWAVE_SECRET_API_KEY", "flutterwave_secret_key"))
+    flutterwave_public_key: str | None = Field(default=None, validation_alias=AliasChoices(  # safe in the browser
+        "WAMIWA_FLUTTERWAVE_PUBLIC_KEY", "WAMIWA_FLUTTERWAVE_PUBLIC_API_KEY", "flutterwave_public_key"))
+    flutterwave_webhook_hash: str | None = None  # the "secret hash" set for webhooks in the dashboard
+    # PY-05 PayPal, a second way to pay (in US dollars). Off until both are set. From developer.paypal.com:
+    # Apps & Credentials. Sandbox credentials use test money; live ones need paypal_environment="live".
+    paypal_client_id: str | None = None  # safe in the browser: it loads PayPal's buttons
+    paypal_secret: str | None = Field(default=None, validation_alias=AliasChoices(
+        "WAMIWA_PAYPAL_SECRET", "WAMIWA_PAYPAL_API_SECRET_KEY", "paypal_secret"))
+    paypal_environment: str = "sandbox"  # sandbox | live
+    # Test keys kept beside the live ones. Outside production they're always used, so a laptop never charges real
+    # money. On the live site they're used until a Super Admin presses Go live, and never after.
+    flutterwave_sandbox_secret_key: str | None = None
+    flutterwave_sandbox_public_key: str | None = None
+    paypal_sandbox_client_id: str | None = None
+    paypal_sandbox_secret: str | None = Field(default=None, validation_alias=AliasChoices(
+        "WAMIWA_PAYPAL_SANDBOX_SECRET", "WAMIWA_PAYPAL_SANDBOX_SECRET_KEY", "paypal_sandbox_secret"))
+    home_region: str = "nigeria"  # people in this country pay and are paid in Naira; everyone else in US dollars
     # Browser apps allowed to call the API (the web frontend in development and on the site).
     # In the environment: a JSON list, or addresses separated by commas or spaces.
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: [
@@ -65,25 +88,48 @@ class Settings(BaseSettings):
     # --- third-party credentials (PRD section 19) ---
     # Not read yet: every provider still runs on its sandbox adapter. Each key is used once the
     # matching adapter is written and wired in app/container.py.
+    # YouVerify (ON-05): ID lookups, face matching and its live check. Off until the key and merchant key are set.
+    # Sandbox keys only work with youverify_environment="sandbox"; live keys need "live".
     youverify_api_key: str | None = None
-    korapay_secret_key: str | None = None
-    korapay_public_key: str | None = None
+    youverify_public_merchant_key: str | None = None  # safe in the browser: it starts the live check
+    youverify_environment: str = "sandbox"  # sandbox | live
+    # LK-01: celebrity names only the person themselves may use for a likeness page or a promoted name
+    protected_identity_names: list[str] = Field(default_factory=lambda: [
+        "burna boy", "davido", "wizkid", "tiwa savage", "beyonce"])
     heygen_api_key: str | None = None
-    sms_voice_api_key: str | None = None  # vendor to choose
+    # Africa's Talking: SMS codes and alerts, and the guardian confirmation call (ON-04, LK-09).
+    # Username "sandbox" uses its sandbox, which reaches no real phone.
+    africastalking_username: str | None = None
+    africastalking_api_key: str | None = None
+    africastalking_sender_id: str | None = None  # a registered sender name such as "Wamiwa"; else Africa's Talking's default
+    africastalking_voice_number: str | None = None  # the Africa's Talking number calls come from
+    # Secret part of the voice callback URL set on that number: /webhooks/africastalking/voice?token=<this>
+    africastalking_callback_token: str | None = None
     email_provider: str = "sandbox"  # "resend" sends real email; "sandbox" only records it (development, tests)
     email_api_key: str | None = None  # Resend API key
     email_from_address: str = "no-reply@wamiwa.site"  # its domain must be verified in Resend
     email_from_name: str = "Wamiwa"
     email_reply_to: str | None = "info@wamiwa.site"  # where replies to Wamiwa's emails land
-    moderation_api_key: str | None = None  # vendor to choose
+    # Claude for moderation, likeness-script screening and sentiment: one Anthropic API key, a model per job.
+    moderation_api_key: str | None = None
+    # Needed only when the key belongs to the organisation rather than a workspace (Console > Workspaces, the ID).
+    moderation_workspace_id: str | None = None
+    moderation_model: str = "claude-haiku-5-5"  # posts, comments, agent replies (every one is checked)
+    script_screening_model: str = "claude-opus-5-5"  # likeness scripts (few, and they become videos of real people)
+    sentiment_model: str = "claude-haiku-5-5"  # company sentiment reports
     watermark_api_key: str | None = None  # vendor to choose
-    fx_api_key: str | None = None  # live USD -> NGN rate source, to choose
     link_safety_api_key: str | None = None  # scam / phishing reputation, to choose
-    trends_api_key: str | None = None  # outside trends by region, to choose
+    trends_api_key: str | None = None  # not used: trends come from YouTube's chart, with youtube_api_key
     spotify_client_id: str | None = None  # looking artists up by name
     spotify_client_secret: str | None = None
     youtube_api_key: str | None = None
-    audiomack_api_key: str | None = None
+    # Apple Music (artist lookup): from developer.apple.com > Certificates, IDs & Profiles > Keys, a key with
+    # MusicKit enabled. Wamiwa signs its own short-lived token from these three for each lookup.
+    apple_music_team_id: str | None = None
+    apple_music_key_id: str | None = None
+    apple_music_private_key: str | None = Field(default=None, validation_alias=AliasChoices(  # the .p8 file's text
+        "WAMIWA_APPLE_MUSIC_PRIVATE_KEY", "WAMIWA_APPLE_MUSIC_API_KEY", "apple_music_private_key"))
+    apple_music_storefront: str = "ng"  # the Apple Music country whose catalogue and links are used
     instagram_client_id: str | None = None
     instagram_client_secret: str | None = None
     tiktok_client_id: str | None = None
@@ -130,6 +176,8 @@ class Settings(BaseSettings):
 
     # --- fees (PY-01) ---
     fee_pct_hire_me: int = 20
+    equity_min_cash_pct: int = 50  # HM-06: with equity, cash must be at least this % of the starting price
+    equity_service_fee_cents: int = 5_00  # HM-06: each side pays this on an equity-only deal (no cash)
     fee_pct_likeness: int = 20
     fee_pct_agent: int = 10
 
@@ -252,12 +300,25 @@ class Settings(BaseSettings):
     cache_ttl_dashboard: int = 300
     cache_ttl_category_map: int = 600
     cache_ttl_fx: int = 24 * 3600
+    fx_stale_alert_days: int = 2  # admins are told when the saved rate in use is this many days old
     cache_ttl_api_key: int = 60
     cache_ttl_sentiment: int = 120
 
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @model_validator(mode="after")
+    def _test_keys_outside_production(self) -> "Settings":
+        if self.is_production:
+            return self
+        if self.flutterwave_sandbox_secret_key:
+            self.flutterwave_secret_key = self.flutterwave_sandbox_secret_key
+            self.flutterwave_public_key = self.flutterwave_sandbox_public_key or self.flutterwave_public_key
+        if self.paypal_sandbox_client_id and self.paypal_sandbox_secret:
+            self.paypal_client_id, self.paypal_secret = self.paypal_sandbox_client_id, self.paypal_sandbox_secret
+            self.paypal_environment = "sandbox"
+        return self
 
 
 @lru_cache

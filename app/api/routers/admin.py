@@ -200,7 +200,7 @@ async def claim_item(item_id: str, p: Admin, svc: Services):
     item = await svc.queues.claim(p.account, item_id)
     context = await svc.admin.account_detail(item.subject_account_id) if item.subject_account_id else None
     return ok({"id": item.id, "claimed_by": item.claimed_by, "target_type": item.target_type,
-               "target_id": item.target_id, "context": context})
+               "target_id": item.target_id, "context": context, "target": await svc.queues.target_detail(item)})
 
 
 @router.post("/queue-items/{item_id}/release")
@@ -260,8 +260,10 @@ async def set_category_map(body: CategoryMapIn, p: Admin, svc: Services):
 
 @router.get("/support/tickets")
 async def support_tickets(p: Admin, svc: Services, status: TicketStatus | None = None, cursor: str | None = None,
-                          limit: int = 50):
-    return ok_page(await svc.support.staff_list(status, cursor, limit))
+                          limit: int = 50, newest_first: bool = False, subject_prefix: str | None = None):
+    """Oldest first by default (the queue order); `newest_first` and `subject_prefix` serve the feedback page."""
+    return ok_page(await svc.support.staff_list(status, cursor, limit, newest_first=newest_first,
+                                                subject_prefix=subject_prefix))
 
 
 @router.get("/support/tickets/{ticket_id}")
@@ -296,3 +298,22 @@ async def dashboard_csv(p: Admin, svc: Services, start: datetime | None = None, 
     body = await svc.admin_analytics.export_csv(p.account, start=start, end=end, role=role, niche=niche, region=region)
     return PlainTextResponse(body, media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=wamiwa-dashboard.csv"})
+
+
+# --- going live: test payment keys until now, live ones from now on ----------------------------------------------
+class GoLiveIn(BaseModel):
+    totp_code: str = Field(min_length=6, max_length=8)
+    confirm: str = Field(max_length=16, description='Type "GO LIVE"')
+
+
+@router.get("/platform")
+async def platform(p: Admin, svc: Services):
+    svc.admin.require_super(p.account)
+    return ok({**await svc.launch.status(), "test_money_left": await svc.launch.test_money()})
+
+
+@router.post("/platform/go-live")
+async def go_live(body: GoLiveIn, p: Admin, svc: Services):
+    """Switch payments to the live keys for good. Super Admin, fresh two-factor code, and "GO LIVE" typed out.
+    Refused while any test payment is still recorded (run the reset first)."""
+    return ok(await svc.launch.go_live(p.account, body.totp_code, body.confirm))

@@ -1,6 +1,9 @@
 """ON-05 identity, ON-06 bank accounts, ON-07 creators, ON-07a popularity card, ON-08 friend import."""
-from datetime import timedelta
+import re
+from datetime import date, timedelta
 from typing import Any
+
+from sqlalchemy import select
 
 from app.core.enums import (
     AccountStatus, DocumentType, NotificationType, PopularityLevel, PublicFigureMethod, Queue,
@@ -16,8 +19,9 @@ from app.services.base import BaseService
 
 
 class IdentityService(BaseService):
-    async def submit(self, account: Account, document_type: DocumentType, document_ref: str,
-                     selfie_ref: str, liveness_ref: str | None = None) -> dict[str, Any]:
+    LIVE_CHECK_TTL = 30 * 60
+
+    async def _require_can_verify(self, account: Account) -> UserProfile:
         profile = await self.svc.access.profile(account.id)
         if profile is None:
             raise Unprocessable("Companies verify with business documents", code="not_a_user",
@@ -28,26 +32,53 @@ class IdentityService(BaseService):
                 IdentityVerification.account_id == account.id,
                 IdentityVerification.status == VerificationStatus.MANUAL_REVIEW):
             raise Conflict("Your verification is with our team for manual review", code="manual_review")
+        return profile
+
+    async def start_live_check(self, account: Account) -> dict[str, Any]:
+        """ON-05: what the browser needs for the live check. With YouVerify, its own check runs in the page under a
+        session tied to this account; otherwise Wamiwa's camera check records a frame and a clip."""
+        await self._require_can_verify(account)
+        await self.limiter.enforce(self.policies.live_checks, account.id)
+        session = await self.providers.identity.start_liveness(account.id)
+        if session is None:
+            return {"provider": "camera"}
+        await self.kv.set(f"livecheck:{session['session_id']}", account.id, self.LIVE_CHECK_TTL)
+        return session
+
+    async def submit(self, account: Account, document_type: DocumentType, document_ref: str | None,
+                     selfie_ref: str | None, liveness_ref: str | None = None, *, id_number: str | None = None,
+                     liveness_session_id: str | None = None) -> dict[str, Any]:
+        profile = await self._require_can_verify(account)
+        if liveness_session_id:
+            # Only a live check this account started counts, and only once.
+            if await self.kv.get(f"livecheck:{liveness_session_id}") != account.id:
+                raise Forbidden("Start the live check again", code="live_check_expired")
+            await self.kv.delete(f"livecheck:{liveness_session_id}")
         await self.limiter.enforce(self.policies.id_verification, account.id)
 
-        result = await self.providers.identity.verify(document_type, document_ref, selfie_ref, liveness_ref)
+        result = await self.providers.identity.verify(
+            document_type, document_ref, selfie_ref, liveness_ref, id_number=id_number,
+            liveness_session=liveness_session_id, in_home_country=not self.svc.payment.is_international(account))
+        number = (id_number or "").replace(" ", "")
         record = await self.repo(IdentityVerification).add(IdentityVerification(
-            account_id=account.id, document_type=document_type, document_ref=document_ref, selfie_ref=selfie_ref,
-            liveness_ref=liveness_ref,
+            account_id=account.id, document_type=document_type,
+            # A looked-up number is kept masked; the full number is never stored.
+            document_ref=document_ref or f"{document_type}:{'*' * max(0, len(number) - 4)}{number[-4:]}",
+            selfie_ref=selfie_ref or result.face_ref or "", liveness_ref=liveness_ref or liveness_session_id,
             liveness_result=result.liveness_passed, verified_name=result.verified_name,
             verified_dob=result.date_of_birth, failure_reason=result.failure_reason,
         ))
+        if result.needs_review:
+            # Passports and IDs from outside Nigeria: staff read the name and date of birth from the document.
+            record.status = VerificationStatus.MANUAL_REVIEW
+            await self.svc.queues.enqueue(Queue.IDENTITY, "identity_document", record.id,
+                                          subject_account_id=account.id,
+                                          summary=f"Confirm name and date of birth from the {document_type}. "
+                                                  f"{result.review_note or ''}".strip())
+            return self._status(record, profile)
         if result.passed:
-            today = self.clock.today()
-            if result.date_of_birth and age_on(result.date_of_birth, today) < self.s.adult_age:
-                # The ID contradicts the adult date of birth given at signup (ON-02).
-                record.status = VerificationStatus.FAILED
-                record.failure_reason = "ID shows a different age from the one given at signup"
-                await self.svc.accounts.flag_false_age(account, record.failure_reason)
-                return self._status(record, profile)
-            record.status = VerificationStatus.PASSED
-            await self._mark_verified(account, profile, result.verified_name or profile.name,
-                                      result.date_of_birth, result.face_ref)
+            await self._accept(account, profile, record, result.verified_name or profile.name, result.date_of_birth,
+                               result.face_ref)
             return self._status(record, profile)
 
         profile.id_attempts += 1
@@ -59,6 +90,44 @@ class IdentityService(BaseService):
         else:
             record.status = VerificationStatus.FAILED
         return self._status(record, profile)
+
+    async def _accept(self, account: Account, profile: UserProfile, record: IdentityVerification, name: str,
+                      dob, face_ref: str | None) -> None:
+        """The ID checks out: verify the account, unless it shows a minor or is already verified elsewhere."""
+        record.verified_name, record.verified_dob = name, dob
+        if dob and age_on(dob, self.clock.today()) < self.s.adult_age:
+            # The ID contradicts the adult date of birth given at signup (ON-02).
+            record.status = VerificationStatus.FAILED
+            record.failure_reason = "ID shows a different age from the one given at signup"
+            await self.svc.accounts.flag_false_age(account, record.failure_reason)
+            return
+        other = await self._verified_elsewhere(account, name, dob)
+        if other:
+            # One person, one account: stops a suspended person returning on a new account, and one person
+            # running several earning accounts. Genuine cases (a lost login) are sorted out by support.
+            record.status = VerificationStatus.FAILED
+            record.failure_reason = ("This ID is already verified on another Wamiwa account. If that's your old "
+                                     "account and you can't get into it, contact support.")
+            await self.svc.queues.enqueue(
+                Queue.IDENTITY, "duplicate_identity", record.id, subject_account_id=account.id, severity="high",
+                summary=f"ID already verified on account {other.id} ({other.status}); possible second account")
+            return
+        record.status = VerificationStatus.PASSED
+        await self._mark_verified(account, profile, name, dob, face_ref)
+
+    async def _verified_elsewhere(self, account: Account, name: str | None, dob) -> Account | None:
+        """Another account (not deleted) already verified with the same name and date of birth."""
+        if not name or not dob:
+            return None
+        key = " ".join(re.findall(r"[a-z]+", name.lower()))
+        rows = (await self.db.execute(
+            select(IdentityVerification, Account).join(Account, Account.id == IdentityVerification.account_id).where(
+                IdentityVerification.status == VerificationStatus.PASSED, IdentityVerification.verified_dob == dob,
+                IdentityVerification.account_id != account.id, Account.status != AccountStatus.DELETED))).all()
+        for record, other in rows:
+            if " ".join(re.findall(r"[a-z]+", (record.verified_name or "").lower())) == key:
+                return other
+        return None
 
     def _status(self, record: IdentityVerification, profile: UserProfile) -> dict[str, Any]:
         return {
@@ -105,6 +174,21 @@ class IdentityService(BaseService):
             return
         record = await self.repo(IdentityVerification).require(item.target_id)
         record.reviewed_by = admin.id
+        if approved and item.target_type == "identity_document":
+            # The reviewer reads the name and date of birth off the document; the usual age and one-ID checks apply.
+            name, born = payload.get("verified_name"), payload.get("verified_dob")
+            try:
+                born = date.fromisoformat(str(born))
+            except ValueError:
+                born = None
+            if not name or born is None:
+                raise Unprocessable("Give the name and date of birth exactly as on the document",
+                                    code="document_details_required", fields=["verified_name", "verified_dob"])
+            await self._accept(account, profile, record, " ".join(str(name).split()), born, record.selfie_ref or None)
+            if record.status != VerificationStatus.PASSED:
+                await self.svc.notifications.notify(account.id, NotificationType.SECURITY,
+                                                    "Identity verification was not approved", record.failure_reason)
+            return
         if approved:
             record.status = VerificationStatus.PASSED
             await self._mark_verified(account, profile, payload.get("verified_name") or record.verified_name
@@ -124,7 +208,7 @@ class BankAccountService(BaseService):
         return profile.verified_name if profile else None
 
     async def save(self, account: Account, bank_code: str, account_number: str, account_name: str,
-                   totp_code: str | None) -> dict[str, Any]:
+                   totp_code: str | None, details: dict[str, str] | None = None) -> dict[str, Any]:
         if await self.svc.access.is_minor(account.id):
             raise Forbidden("Payouts for 13-17 accounts go to the guardian's bank account",
                             code="guardian_account_required")
@@ -133,6 +217,20 @@ class BankAccountService(BaseService):
         if existing is not None:
             self.svc.auth.require_totp(account, totp_code)  # section 20: 2FA required for payout changes
 
+        # PY-05: creators in Nigeria are paid to a Nigerian bank in Naira; everyone else to their own bank in dollars.
+        international = self.svc.payment.is_international(account)
+        if international:
+            bank_code, account_number = "intl", account_number.replace(" ", "").upper()
+            missing = [k for k in ("bank_name", "beneficiary_address", "beneficiary_country") if not (details or {}).get(k)]
+            if not ((details or {}).get("swift_code") or (details or {}).get("routing_number")):
+                missing.append("swift_code or routing_number")
+            if missing:
+                raise Unprocessable("For a bank outside Nigeria, add: " + ", ".join(missing), code="bank_details_required",
+                                    missing=missing)
+            if not (5 <= len(account_number) <= 34 and account_number.isalnum()):
+                raise Unprocessable("Enter the account number or IBAN", code="invalid_account_number")
+        elif not (account_number.isdigit() and len(account_number) == 10):
+            raise Unprocessable("A Nigerian account number is 10 digits", code="invalid_account_number")
         resolved = await self.providers.payments.resolve_account_name(bank_code, account_number, account_name)
         if resolved is None:
             raise Unprocessable("We could not find that bank account. Check the details.", code="account_not_found")
@@ -141,10 +239,11 @@ class BankAccountService(BaseService):
         if existing is None:
             bank = await self.repo(BankAccount).add(BankAccount(
                 account_id=account.id, bank_code=bank_code, account_number=account_number,
-                account_name=resolved, verified=matches))
+                account_name=resolved, verified=matches, details=details if bank_code == "intl" else None))
         else:
             bank = existing
             bank.bank_code, bank.account_number, bank.account_name = bank_code, account_number, resolved
+            bank.details = details if bank_code == "intl" else None
             bank.verified = matches
             bank.hold_until = self.now() + timedelta(hours=self.s.bank_change_hold_hours)
             alert = f"Your payout bank details were changed. Payouts are held for {self.s.bank_change_hold_hours} hours."
@@ -156,7 +255,9 @@ class BankAccountService(BaseService):
     def present(self, bank: BankAccount) -> dict[str, Any]:
         on_hold = bool(bank.hold_until and bank.hold_until > self.now())
         return {
-            "bank_code": bank.bank_code, "account_number": f"******{bank.account_number[-4:]}",
+            "bank_code": bank.bank_code,
+            "account_number": f"******{bank.account_number[-4:]}",
+            "bank_name": (bank.details or {}).get("bank_name"), "currency": "USD" if bank.bank_code == "intl" else "NGN",
             "account_name": bank.account_name, "name_matches_id": bank.verified,
             "hold_until": bank.hold_until.isoformat() if on_hold else None,
             "payouts_blocked": not bank.verified or on_hold,
