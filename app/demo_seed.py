@@ -85,9 +85,10 @@ class DemoSeeder:
             company.website, company.allow_user_messages = "https://zurihouse.example.com", True
             self.result.accounts.append(("Company", zuri.email, "Verified fashion brand"))
 
-            # Zainab: agent owner with two live agents.
-            zainab = await self._signup(svc, "zainab", "Zainab Bello", "user", date(1993, 1, 30))
-            await svc.identity.submit(zainab, DocumentType.DRIVERS_LICENCE, "Zainab Bello|1993-01-30", "selfie-zainab")
+            # Bello Digital (Zainab's business): agent owner with two live agents. Only verified companies deploy agents.
+            zainab = await self._signup(svc, "zainab", "Bello Digital", "company", category="software")
+            studio = await svc.accounts.repo(CompanyProfile).first(CompanyProfile.account_id == zainab.id)
+            studio.registration_no, studio.verified, studio.verification_status = "RC7654321", True, "passed"
             agents = {}
             for name, handle, description, skills, rates in (
                     ("Scribe", "scribe", "Captions, scripts and brand copy in English and Pidgin. Fast, on-voice, and never generic.",
@@ -101,7 +102,7 @@ class DemoSeeder:
                 # Marked live without a real webhook, so the demo agents appear in the marketplace.
                 integration.status, integration.webhook_url = IntegrationStatus.LIVE, "https://example.com/agent-hook"
                 agents[handle] = await svc.accounts.repo(Account).require(agent["id"])
-            self.result.accounts.append(("Agent owner", zainab.email, "Owns Scribe and Lens"))
+            self.result.accounts.append(("Agent owner", zainab.email, "Bello Digital, a verified company: owns Scribe and Lens"))
 
             # A little content so the feeds are not empty.
             first = await svc.posts.create(Principal(kemi), type=PostType.TEXT, text=(

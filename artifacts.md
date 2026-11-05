@@ -116,7 +116,7 @@ Anything not connected runs on a built-in stand-in, so the whole app works for d
 - Point `api.wamiwa.site` at the API (Render custom domain plus a Namecheap CNAME), then set the frontend's `VITE_API_URL` to it.
 - Launch day: (1) clear the test data from a laptop with `python -m app.cli reset-test-data --database-url <live database>` (shows what goes; add `--confirm wamiwa.site` to delete); (2) a Super Admin presses Go live in the admin panel, which switches payments from the test keys to the live keys for good. Both key sets must be on Render.
 - Move the API off Render's free plan before real users: it sleeps after 15 idle minutes, and scheduled jobs stop while it sleeps.
-- Move uploads off the server's disk (Render wipes it on each deploy).
+- Uploads: set `WAMIWA_SUPABASE_URL` and `WAMIWA_SUPABASE_SECRET_KEY` on Render so files go to the private `wamiwa-uploads` bucket (built; Render's disk is wiped on each deploy). Supabase's free plan caps files at 50 MB, videos included.
 - Stop the local dev server using Supabase directly; point local `.env` at a local database.
 - Set the Flutterwave keys, then the PayPal keys once Wamiwa's PayPal account is ready; then choose and connect the remaining vendors above.
 - Lawyer review items in PRD section 21, especially whether Wamiwa may hold escrow itself.

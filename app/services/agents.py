@@ -58,14 +58,17 @@ class AgentService(BaseService):
         return cleaned
 
     async def require_owner_eligible(self, owner: Account) -> None:
-        """AG-01: only ID-verified users or verified companies can deploy agents."""
-        if owner.is_company:
-            await self.svc.access.require_verified_company(owner, "deploy agents")
-        elif owner.is_user:
-            await self.svc.access.require_adult(owner, "deploy agents")
-            await self.svc.access.require_id_verified(owner, "deploy agents")
-        else:
-            raise Forbidden("Only verified users or companies can deploy agents", code="owner_not_eligible")
+        """AG-01: only verified (registered) companies deploy agents; they are accountable for what agents do."""
+        if not owner.is_company:
+            raise Forbidden("Only registered businesses can deploy agents. Individuals can hire agents from the "
+                            "marketplace.", code="companies_only")
+        await self.svc.access.require_verified_company(owner, "deploy agents")
+
+    def listed(self):
+        """AG-03: an agent appears in the marketplace and search only once it's live: its webhook is set and passed
+        Wamiwa's test. The Wamiwa Agent, bought as a plan rather than hired, is always listed."""
+        live = select(AgentIntegration.agent_account_id).where(AgentIntegration.status == IntegrationStatus.LIVE)
+        return or_(Account.id.in_(live), Account.handle == self.s.wamiwa_agent_handle)
 
     async def deploy(self, owner: Account, *, name: str, handle: str, description: str, skills: list[str],
                      rates: dict[str, int], free_tag_daily_cap: int, accept_platform_fee: bool = False) -> dict[str, Any]:
@@ -176,7 +179,7 @@ class AgentService(BaseService):
 
         async def load() -> dict[str, Any]:
             stmt = (select(Account, AgentProfile).join(AgentProfile, AgentProfile.account_id == Account.id)
-                    .where(Account.type == AccountType.AGENT, Account.status == AccountStatus.ACTIVE))
+                    .where(Account.type == AccountType.AGENT, Account.status == AccountStatus.ACTIVE, self.listed()))
             if q:
                 pattern = f"%{q.lower()}%"
                 stmt = stmt.where(or_(AgentProfile.name.ilike(pattern), AgentProfile.description.ilike(pattern)))
@@ -205,7 +208,9 @@ class AgentService(BaseService):
     async def detail(self, agent_id: str) -> dict[str, Any]:
         agent = await self.repo(AgentProfile).first(AgentProfile.account_id == agent_id)
         account = await self.repo(Account).get(agent_id)
-        if agent is None or account is None or account.status != AccountStatus.ACTIVE:
+        listed = account is not None and (await self.db.execute(
+            select(Account.id).where(Account.id == agent_id, self.listed()))).first() is not None
+        if agent is None or account is None or account.status != AccountStatus.ACTIVE or not listed:
             raise NotFound("This agent is no longer available", code="agent_unavailable",
                            similar_agents_url=f"/marketplace/agents?similar_to={agent_id}")
         statuses = await self._integration_statuses([agent_id])
@@ -277,6 +282,7 @@ class AgentIntegrationService(BaseService):
         integration = await self._get(owner, agent_id)
         integration.webhook_url = self._validate_url(webhook_url)
         integration.status, integration.failing_since = IntegrationStatus.PENDING_TEST, None
+        await self.cache.invalidate_prefix("marketplace:")  # off the marketplace until the new webhook passes
         result = self.present(integration)
         if integration.webhook_secret is None:
             integration.webhook_secret = SecretFactory.webhook_secret()
@@ -323,6 +329,7 @@ class AgentIntegrationService(BaseService):
                                 status_code=response.status_code)
         integration.status, integration.last_success_at = IntegrationStatus.LIVE, self.now()
         integration.failing_since = None
+        await self.cache.invalidate_prefix("marketplace:")  # listed from now on
         return self.present(integration)
 
     async def resolve_key(self, raw_key: str) -> Principal:

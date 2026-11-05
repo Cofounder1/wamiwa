@@ -1,10 +1,18 @@
-"""Where uploaded files live. Local disk for development; a cloud bucket adapter replaces it later."""
+"""Where uploaded files live: local disk on a laptop, a private Supabase Storage bucket on the live site.
+
+Every upload lands on local disk first, where its size and contents are checked and photo location data is
+removed; `finalize` then moves it to the bucket. Files are always served by the API itself (never straight from the
+bucket), so the safety headers apply and private kinds are never served at all.
+"""
 import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
+from functools import lru_cache
 from typing import AsyncIterator
+
+import httpx
 
 KEY_RE = re.compile(r"^[a-z_]+/[0-9a-f]{32}\.[a-z0-9]{1,5}$")
 
@@ -16,7 +24,33 @@ class FileStorage(ABC):
 
     @abstractmethod
     def path(self, key: str) -> Path | None:
-        """Local path to serve the file from, or None if it does not exist."""
+        """The local copy, if this storage keeps one."""
+
+    async def finalize(self, key: str, content_type: str) -> None:
+        """After the checks: move the upload to permanent storage. Local disk already is."""
+
+    async def read(self, key: str, max_bytes: int) -> bytes | None:
+        """The whole file, if it exists and is no larger than `max_bytes`."""
+        path = self.path(key)
+        if path is None or path.stat().st_size > max_bytes:
+            return None
+        return await asyncio.to_thread(path.read_bytes)
+
+    async def stream(self, key: str) -> AsyncIterator[bytes] | None:
+        """The file in chunks, for serving, or None if it doesn't exist."""
+        path = self.path(key)
+        if path is None:
+            return None
+
+        async def chunks() -> AsyncIterator[bytes]:
+            handle = await asyncio.to_thread(open, path, "rb")
+            try:
+                while chunk := await asyncio.to_thread(handle.read, 1024 * 1024):
+                    yield chunk
+            finally:
+                await asyncio.to_thread(handle.close)
+
+        return chunks()
 
     @abstractmethod
     async def delete(self, key: str) -> None: ...
@@ -63,3 +97,87 @@ class LocalFileStorage(FileStorage):
         target = self.path(key)
         if target:
             target.unlink(missing_ok=True)
+
+
+class SupabaseFileStorage(LocalFileStorage):
+    """A private Supabase Storage bucket, through its REST API with a server-only key. Uploads are staged on local
+    disk for the checks, then copied to the bucket and the local copy deleted."""
+
+    def __init__(self, staging_root: str, url: str, key: str, bucket: str, *, timeout: float = 120.0,
+                 transport: httpx.AsyncBaseTransport | None = None):
+        super().__init__(staging_root)
+        headers = {"apikey": key}
+        if key.startswith("eyJ"):  # a legacy service_role JWT also goes in Authorization; sb_secret_ keys don't
+            headers["Authorization"] = f"Bearer {key}"
+        self._client = httpx.AsyncClient(base_url=f"{url.rstrip('/')}/storage/v1", headers=headers, timeout=timeout,
+                                         transport=transport)
+        self.bucket = bucket
+
+    def _object(self, key: str) -> str:
+        if not KEY_RE.match(key):
+            raise ValueError("invalid file key")
+        return f"/object/{self.bucket}/{key}"
+
+    async def finalize(self, key: str, content_type: str) -> None:
+        local = super().path(key)
+        if local is None:
+            raise OSError(f"upload {key} vanished before it was stored")
+
+        async def body() -> AsyncIterator[bytes]:
+            handle = await asyncio.to_thread(open, local, "rb")
+            try:
+                while chunk := await asyncio.to_thread(handle.read, 1024 * 1024):
+                    yield chunk
+            finally:
+                await asyncio.to_thread(handle.close)
+
+        response = await self._client.post(self._object(key), content=body(), headers={
+            "Content-Type": content_type, "x-upsert": "true", "Content-Length": str(local.stat().st_size)})
+        if response.status_code >= 300:
+            raise OSError(f"Supabase Storage refused {key}: HTTP {response.status_code} {response.text[:200]}")
+        local.unlink(missing_ok=True)
+
+    async def read(self, key: str, max_bytes: int) -> bytes | None:
+        local = await super().read(key, max_bytes)
+        if local is not None or super().path(key) is not None:
+            return local
+        response = await self._client.get(self._object(key))
+        if response.status_code != 200 or len(response.content) > max_bytes:
+            return None
+        return response.content
+
+    async def stream(self, key: str) -> AsyncIterator[bytes] | None:
+        if super().path(key) is not None:  # still staged: not moved yet
+            return await super().stream(key)
+        request = self._client.build_request("GET", self._object(key))
+        response = await self._client.send(request, stream=True)
+        if response.status_code != 200:
+            await response.aclose()
+            return None
+
+        async def chunks() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in response.aiter_bytes(1024 * 1024):
+                    yield chunk
+            finally:
+                await response.aclose()
+
+        return chunks()
+
+    async def delete(self, key: str) -> None:
+        await super().delete(key)
+        response = await self._client.request("DELETE", f"/object/{self.bucket}", json={"prefixes": [key]})
+        if response.status_code >= 300 and response.status_code != 404:
+            raise OSError(f"Supabase Storage didn't delete {key}: HTTP {response.status_code}")
+
+
+@lru_cache(maxsize=4)
+def _cached(staging_root: str, url: str | None, key: str | None, bucket: str) -> FileStorage:
+    if url and key:
+        return SupabaseFileStorage(staging_root, url, key, bucket)
+    return LocalFileStorage(staging_root)
+
+
+def build_storage(settings) -> FileStorage:
+    """The one storage for this process: Supabase once its URL and key are set, local disk otherwise."""
+    return _cached(settings.upload_dir, settings.supabase_url, settings.supabase_secret_key, settings.supabase_storage_bucket)

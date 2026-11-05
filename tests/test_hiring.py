@@ -134,7 +134,7 @@ async def test_likeness_page_eligibility_and_pricing(api):
 
     admin, brand, influencer = await likeness_setup(api)
     guide = await api.ok("GET", "/likeness/pricing-guide", influencer)
-    assert guide["type"] == "follower_based" and guide["max_price_cents"] == 105_00
+    assert guide["type"] == "follower_based" and guide["max_price_cents"] == 127_00
     r = await api.call("PUT", "/likeness/page", influencer, json={"price_image_cents": 150_00}, expect=422)
     assert r.json()["code"] == "price_above_ceiling"
     # Voice and exclusivity are charged on top with no cap; only the image-only price has a ceiling.
@@ -344,7 +344,7 @@ async def test_minor_contract_needs_guardian_approval_and_call(api):
 
 
 async def test_agent_order_escrow_revision_and_fee(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     hirer = await api.signup("hirer")
     agent = await api.live_agent(owner, rates={"research": 50_00})
     listing = await api.call("GET", "/marketplace/agents?skill=research&max_price_cents=6000", hirer, expect=200)

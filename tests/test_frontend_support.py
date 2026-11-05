@@ -135,6 +135,6 @@ async def test_demo_seed_gives_every_persona_working_data(api):
     root = await api.ok("POST", "/auth/login", json={"email": "dami@example.com", "password": DEMO_PASSWORD,
                                                       "totp_code": api.infra.totp.now(result.admin_totp["dami@example.com"])})
     counts = await api.call("GET", "/admin/accounts/count", headers={"Authorization": f"Bearer {root['access_token']}"}, expect=200)
-    assert counts.json()["data"]["users"] == 4
+    assert counts.json()["data"]["users"] == 3  # Zainab runs Bello Digital, a company: agents are deployed by businesses
     with pytest.raises(RuntimeError, match="already there"):
         await DemoSeeder(api.infra).run()

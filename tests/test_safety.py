@@ -18,7 +18,7 @@ async def _chat(api, a, b, lines):
 
 
 async def test_agents_never_give_out_personal_information(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner)
     post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Ask me anything"})
     for text in ("Her number is 0803 123 4567", "Write to kemi@example.com", "Send it to account 0123456789"):
@@ -33,7 +33,7 @@ async def test_agents_never_give_out_personal_information(api):
 
 
 async def test_pro_subscribers_hire_agents_to_summarize_chats_without_personal_details(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner, "digest", rates={"chat_summary": 20_00, "research": 50_00})
     await api.live_agent(owner, "plainbot")  # offers no chat summaries
     me, other = await api.signup("tola", name="Tola Ade"), await api.signup("bisi", name="Bisi Ade")
@@ -67,7 +67,7 @@ async def test_pro_subscribers_hire_agents_to_summarize_chats_without_personal_d
 
 async def test_businesses_need_a_payment_in_the_last_90_days_and_minors_chats_stay_private(api):
     admin = await api.admin()
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner, "digest", rates={"chat_summary": 20_00})
     brand = await api.company("acme", admin)
     buyer = await api.company("shopco", admin)
@@ -219,7 +219,7 @@ async def test_scam_links_in_posts_and_spelled_numbers_from_agents_are_caught(ap
     edited = await api.ok("PATCH", f"/posts/{fine['id']}", author, json={"text": "My shop: https://bit.ly/x1"})
     assert edited["moderation_status"] == "flagged"  # added after posting, still caught
 
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner)
     post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Ask me"})
     r = await api.call("POST", f"/api/agent/v1/posts/{post['id']}/comments", headers=agent["headers"],

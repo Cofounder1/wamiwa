@@ -4,9 +4,9 @@ from tests.conftest import build_api
 
 
 async def test_labels_feeds_and_split_metrics(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.influencer("owner", "Owner Person")  # the creator whose posts and analytics are checked
     reader = await api.signup("reader")
-    agent = await api.live_agent(owner)
+    agent = await api.live_agent(await api.agent_owner("agentco"))
 
     human_post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Hello from a person"})
     assert human_post["label"] == "human" and human_post["label_display"] == "Human"
@@ -54,7 +54,7 @@ async def test_unlabeled_ai_content_warns_then_suspends(api):
 
 
 async def test_agent_tag_flow_with_signed_untrusted_webhook(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     asker = await api.signup("asker")
     agent = await api.live_agent(owner, cap=1)
     post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Compound interest"})
@@ -94,7 +94,7 @@ async def test_agent_tag_flow_with_signed_untrusted_webhook(api):
 
 
 async def test_tag_shows_no_response_and_webhook_retries(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     asker = await api.signup("asker")
     agent = await api.live_agent(owner)
     post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Topic"})
@@ -124,7 +124,7 @@ async def test_tag_shows_no_response_and_webhook_retries(api):
 async def test_agent_loop_and_hourly_limits():
     api = await build_api(agent_comments_per_hour=5)
     try:
-        owner = await api.influencer("owner", "Owner Person")
+        owner = await api.agent_owner()
         one, two = await api.live_agent(owner, "bot_one"), await api.live_agent(owner, "bot_two")
         post = await api.ok("POST", "/posts", owner, json={"type": "text", "text": "Debate"})
         last = await api.ok("POST", f"/api/agent/v1/posts/{post['id']}/comments", headers=two["headers"], json={"text": "Opening"})
@@ -148,7 +148,7 @@ async def test_agent_loop_and_hourly_limits():
 
 
 async def test_agent_api_has_no_forbidden_actions_and_key_rotation(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner)
     # The agent key does not work on the human API (no follows, payments, account changes or deletion).
     for method, path in (("PUT", f"/follows/{owner.id}"), ("PATCH", "/accounts/me/profile"),
@@ -282,7 +282,7 @@ async def test_company_api_keys_limits_moderation_and_sentiment():
 async def test_retried_writes_do_not_happen_twice(api):
     admin = await api.admin()
     brand = await api.company("acme", admin)
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner)
     key = (await api.ok("POST", "/api-keys", brand, json={"name": "assistant"}))["api_key"]
     company = {"Authorization": f"Bearer {key}"}
@@ -344,3 +344,27 @@ async def test_restricted_category_companies_never_receive_minors_comments(api):
     # An ordinary company receives everyone's comments; a restricted-category one never gets a minor's.
     assert seen["acme"] == ({"adult", "teen"}, 2)
     assert seen["betnow"] == ({"adult"}, 1)
+
+
+async def test_only_businesses_deploy_agents_and_only_live_agents_are_listed(api):
+    """AG-01: individuals hire agents but can't deploy them. AG-03: an agent appears only once its webhook passes."""
+    person = await api.influencer("ada", "Ada Obi")
+    r = await api.call("POST", "/agents", person, json={"name": "Adabot", "handle": "adabot", "rates": {"x": 100},
+                                                         "accept_platform_fee": True}, expect=403)
+    assert r.json()["code"] == "companies_only"
+
+    owner = await api.agent_owner()
+    shopper = await api.signup("shopper")
+    draft = await api.ok("POST", "/agents", owner, json={"name": "Draftbot", "handle": "draftbot", "description": "x",
+                                                          "rates": {"research": 50_00}, "accept_platform_fee": True})
+    listed = lambda: api.ok("GET", "/marketplace/agents", shopper)  # noqa: E731
+    assert draft["id"] not in [a["id"] for a in await listed()]
+    await api.call("GET", f"/marketplace/agents/{draft['id']}", shopper, expect=404)
+    assert not (await api.ok("GET", "/search?q=draftbot&tab=agents", shopper))
+
+    live = await api.live_agent(owner, handle="readybot")
+    assert live["id"] in [a["id"] for a in await listed()]
+    assert (await api.ok("GET", f"/marketplace/agents/{live['id']}", shopper))["accepting_orders"]
+    # A changed webhook takes it off the marketplace until the new one passes the test.
+    await api.ok("PUT", f"/agents/{live['id']}/integration/webhook", owner, json={"webhook_url": "https://agent.example.com/new"})
+    assert live["id"] not in [a["id"] for a in await listed()]

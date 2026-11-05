@@ -150,10 +150,12 @@ class YouVerifyIdentityGateway(IdentityGateway):
 
     async def _compare(self, face_url: str, file_ref: str) -> tuple[bool | None, str]:
         """Compare a face with an uploaded image: (match, confidence), or (None, why it couldn't be compared)."""
-        path = self._storage.path(file_ref)
-        if path is None or not path.exists():
-            return None, "the file is missing"
-        data = path.read_bytes()
+        try:
+            data = await self._storage.read(file_ref, COMPARE_MAX_BYTES + 1)
+        except ValueError:
+            data = None
+        if data is None:
+            return None, "the file is missing or over 1 MB"
         kind = IMAGE_TYPES.get(data[:2])
         if kind is None:
             return None, "the file isn't a photo"
