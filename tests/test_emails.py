@@ -13,13 +13,13 @@ def subjects(api, address):
 
 
 async def test_agent_orders_email_the_owner_and_the_hirer(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     hirer = await api.signup("hirer", name="Tunde Bakare")
     agent = await api.live_agent(owner, rates={"research": 50_00})
     order = await api.ok("POST", f"/marketplace/agents/{agent['id']}/orders", hirer,
                          json={"task": "research", "brief": "Market scan", "payment_method": PAY})
     new_order = next(m for m in inbox(api, owner.email) if m["subject"].startswith("New order for"))
-    assert f"/app/orders/{order['id']}" in new_order["body"] and new_order["body"].startswith("Hi Owner,")
+    assert f"/app/orders/{order['id']}" in new_order["body"] and new_order["body"].startswith("Hi Owner Ltd team,")
     assert "concern your money, contracts or account security" in new_order["body"]
     hirer_mail = subjects(api, hirer.email)
     assert any(s.startswith("Payment received:") for s in hirer_mail) and "Order received: research" in hirer_mail

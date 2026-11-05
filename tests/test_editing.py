@@ -46,7 +46,7 @@ async def test_an_edit_goes_through_moderation_again(api):
 
 
 async def test_comment_editing_and_owners_deleting_their_agents_content(api):
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     commenter = await api.signup("bisi")
     stranger = await api.signup("tunde")
     agent = await api.live_agent(owner)

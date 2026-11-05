@@ -8,7 +8,7 @@ from datetime import timedelta
 from typing import Iterable
 
 from app.core.exceptions import NotFound, Unprocessable
-from app.infra.storage import KEY_RE, LocalFileStorage
+from app.infra.storage import KEY_RE, FileStorage, build_storage
 from app.models import Account, AgentProfile, Upload
 from app.services.base import BaseService
 
@@ -16,8 +16,8 @@ UNUSED_FILE_HOURS = 24
 
 
 class UploadService(BaseService):
-    def storage(self) -> LocalFileStorage:
-        return LocalFileStorage(self.s.upload_dir)
+    def storage(self) -> FileStorage:
+        return build_storage(self.s)
 
     async def record(self, owner: Account, key: str, kind: str, content_type: str, size: int) -> Upload:
         upload = await self.repo(Upload).add(Upload(

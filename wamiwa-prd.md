@@ -407,7 +407,7 @@ As an influencer, I want a likeness page with my photos and optional voice sampl
 - Eligibility: ID + liveness verified, and 500+ human followers, Verified creator, or Verified major person. Minors only through LK-09.
 - Uploaded photos must match the verified face; non-matching photos are rejected.
 - Celebrity names and faces are blocked unless that person verifies the account themselves.
-- Voice samples (optional): at least 3 clips of 30–60 seconds, recorded in-app while reading an on-screen prompt. A separate voice-consent box is required.
+- Voice samples (optional): at least 3 clips of 30–60 seconds, either recorded in the app while reading an on-screen prompt or uploaded as a file; the person chooses. A separate voice-consent box is required.
 - I can set one price for image only and a higher price for image + voice.
 - I can offer category exclusivity at a higher price.
 - Voice samples can be replaced or deleted at any time; deletion stops new voice use but not signed contracts.
@@ -419,7 +419,7 @@ As an influencer, I want a likeness page with my photos and optional voice sampl
 | Follower-based (500+ human followers, or Verified creator) | Image-only price: any amount up to a limit set from followers and engagement (below). Image + voice and exclusivity: any higher amount the influencer chooses. No fixed cap |
 | Verified major person | Names own price; pricing tool shows a recommended range |
 
-- Image-only limit for follower-based influencers: $20, plus $10 for every 1,000 human followers, multiplied by 0.75 (little engagement) up to 1.5 (15% or more of human viewers like or comment). Example: 12,000 followers gives a limit between $105 and $210. Starting values; review with real data.
+- Image-only limit for follower-based influencers: $50, plus $10 for every 1,000 human followers, multiplied by 0.75 (little engagement) up to 1.5 (15% or more of human viewers like or comment), and never below $50. Example: 12,000 followers gives a limit between $127 and $255. Starting values; review with real data.
 - Price changes apply only to new contracts.
 - USD prices are converted to local currency at the rate on the day the brand pays, locked for the contract.
 - Given followers drop below 500 during a contract, then the contract finishes and the listing pauses after.

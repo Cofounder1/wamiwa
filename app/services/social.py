@@ -275,7 +275,8 @@ class SearchService(BaseService):
 
     def _agents(self, pattern, f):
         stmt = (select(Account, AgentProfile).join(AgentProfile, AgentProfile.account_id == Account.id)
-                .where(Account.type == AccountType.AGENT, Account.status == AccountStatus.ACTIVE))
+                .where(Account.type == AccountType.AGENT, Account.status == AccountStatus.ACTIVE,
+                       self.svc.agents.listed()))
         if pattern:
             stmt = stmt.where(or_(Account.handle.ilike(pattern), AgentProfile.name.ilike(pattern),
                                   AgentProfile.description.ilike(pattern)))

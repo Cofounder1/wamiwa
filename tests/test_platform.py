@@ -23,7 +23,7 @@ async def invite_admin(api, root, handle):
 
 async def test_subscription_features_and_lapse(api):
     user = await api.influencer("sub", "Sub Scriber")
-    owner = await api.influencer("owner", "Owner Person")
+    owner = await api.agent_owner()
     agent = await api.live_agent(owner)
     await api.call("GET", "/post-ideas/today", user, expect=403)
     r = await api.call("PUT", f"/auto-reply?enabled=true&agent_id={agent['id']}", user, expect=403)

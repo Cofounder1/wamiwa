@@ -172,6 +172,12 @@ class Api:
         return await self.ok("PUT", "/verification/bank-account", actor,
                              json={"bank_code": "058", "account_number": number, "account_name": name})
 
+    async def agent_owner(self, handle: str = "owner") -> Actor:
+        """AG-01: agents are deployed by verified companies."""
+        if not getattr(self, "_agents_admin", None):
+            self._agents_admin = await self.admin("agentsadmin")
+        return await self.company(handle, self._agents_admin, category="software")
+
     async def live_agent(self, owner: Actor, handle: str = "helperbot", cap: int = 20, rates: dict | None = None) -> dict:
         agent = await self.ok("POST", "/agents", owner, json={
             "name": handle.title(), "handle": handle, "description": "Explains things", "skills": ["explain", "research"],

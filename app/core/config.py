@@ -54,7 +54,14 @@ class Settings(BaseSettings):
     # reading email. Refused outright in production.
     dev_fixed_otp: str | None = None
     # Uploaded files (photos, videos, voice notes, documents). Local disk for now.
-    upload_dir: str = "./uploads"
+    upload_dir: str = "./uploads"  # local disk on a laptop; on the live site only a staging area before the bucket
+    # Supabase Storage for uploads on the live site (Render's disk is wiped on every deploy). Project Settings > API:
+    # the project URL and a secret key (sb_secret_..., or the legacy service_role key). Server only, never in the browser.
+    supabase_url: str | None = None
+    supabase_secret_key: str | None = Field(default=None, validation_alias=AliasChoices(
+        "WAMIWA_SUPABASE_SECRET_KEY", "WAMIWA_SUPABASE_SERVICE_ROLE_KEY", "supabase_secret_key"))
+    supabase_storage_bucket: str = "wamiwa-uploads"  # a private bucket
+    supabase_max_file_mb: int = 50  # Supabase's per-file limit (50 MB on its free plan); uploads are capped to it
     upload_max_bytes: dict[str, int] = Field(default_factory=lambda: {
         "image": 10 * 1024 * 1024, "video": 200 * 1024 * 1024, "voice_note": 25 * 1024 * 1024,
         "document": 25 * 1024 * 1024, "likeness_voice": 25 * 1024 * 1024, "id_document": 10 * 1024 * 1024,
@@ -183,6 +190,7 @@ class Settings(BaseSettings):
     equity_min_cash_pct: int = 50  # HM-06: with equity, cash must be at least this % of the starting price
     equity_service_fee_cents: int = 5_00  # HM-06: each side pays this on an equity-only deal (no cash)
     fee_pct_likeness: int = 20
+    likeness_base_price_cents: int = 50_00  # LK-02: the image-only limit starts here, + $10 per 1,000 followers
     fee_pct_agent: int = 10
 
     # --- contracts ---

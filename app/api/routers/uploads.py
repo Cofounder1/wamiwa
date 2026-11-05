@@ -15,12 +15,12 @@ import secrets
 from typing import AsyncIterator
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import Active, Services, ok
 from app.core.exceptions import NotFound, ServiceUnavailable, Unprocessable
 from app.infra import filetypes, metadata
-from app.infra.storage import FileStorage, LocalFileStorage
+from app.infra.storage import FileStorage, build_storage
 
 router = APIRouter(tags=["uploads"])
 log = logging.getLogger("wamiwa.uploads")
@@ -41,7 +41,18 @@ MEMBER_KINDS = {"voice_note", "document"}
 
 
 def storage(request: Request) -> FileStorage:
-    return LocalFileStorage(request.app.state.infra.settings.upload_dir)
+    return build_storage(request.app.state.infra.settings)
+
+
+def upload_limit(settings, kind: str) -> int:
+    """The kind's limit, never above what the bucket accepts once uploads go to Supabase."""
+    limit = settings.upload_max_bytes[kind]
+    if settings.supabase_url and settings.supabase_secret_key:
+        limit = min(limit, settings.supabase_max_file_mb * 1024 * 1024)
+    return limit
+
+
+EXTENSION_TYPES = {ext: content_type for types in ALLOWED_TYPES.values() for content_type, ext in types.items()}
 
 
 async def _chunks(upload: UploadFile, first: bytes) -> AsyncIterator[bytes]:
@@ -69,7 +80,7 @@ async def upload_file(request: Request, p: Active, svc: Services, kind: str = Fo
         # The browser's label is not trusted: the file's own first bytes must match the type it claims.
         raise Unprocessable(f"This file isn't a real {content_type} file", code="file_content_mismatch")
     key = f"{kind}/{secrets.token_hex(16)}.{allowed[content_type]}"
-    limit = settings.upload_max_bytes[kind]
+    limit = upload_limit(settings, kind)
     try:
         size = await storage(request).save(key, _chunks(file, first), limit)
     except ValueError as exc:
@@ -82,6 +93,13 @@ async def upload_file(request: Request, p: Active, svc: Services, kind: str = Fo
         stored = storage(request).path(key)
         if stored is not None:
             size = await asyncio.to_thread(metadata.scrub_file, stored, content_type)
+    try:
+        await storage(request).finalize(key, content_type)  # to the bucket on the live site; nothing on a laptop
+    except OSError as exc:
+        log.exception("could not store upload %s", key)
+        await storage(request).delete(key)
+        raise ServiceUnavailable("We couldn't store your file right now. Try again shortly.",
+                                 code="storage_unavailable") from exc
     await svc.uploads.record(p.account, key, kind, content_type, size)
     url = f"/media/{key}" if kind in PUBLIC_KINDS | MEMBER_KINDS else None
     return ok({"ref": key, "kind": kind, "size_bytes": size, "content_type": content_type, "url": url})
@@ -91,8 +109,11 @@ async def upload_file(request: Request, p: Active, svc: Services, kind: str = Fo
 async def serve_file(kind: str, name: str, request: Request):
     if kind not in PUBLIC_KINDS | MEMBER_KINDS:
         raise NotFound("File not found")
-    path = storage(request).path(f"{kind}/{name}")
-    if path is None:
+    try:
+        chunks = await storage(request).stream(f"{kind}/{name}")
+    except ValueError:  # not a valid file name
+        chunks = None
+    if chunks is None:
         raise NotFound("File not found")
     headers = {
         "Cache-Control": "public, max-age=31536000, immutable" if kind in PUBLIC_KINDS else "private, max-age=3600",
@@ -103,4 +124,5 @@ async def serve_file(kind: str, name: str, request: Request):
     }
     if kind == "document":  # documents download rather than open in the API's own origin
         headers["Content-Disposition"] = f'attachment; filename="{name}"'
-    return FileResponse(path, headers=headers)
+    media_type = EXTENSION_TYPES.get(name.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+    return StreamingResponse(chunks, media_type=media_type, headers=headers)

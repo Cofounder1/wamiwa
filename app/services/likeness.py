@@ -40,14 +40,16 @@ class LikenessPageService(BaseService):
     async def price_ceiling(self, account: Account) -> int:
         """Follower-based ceiling for the image-only price, from human followers and human engagement.
 
-        $20 to start, plus 1 cent per follower ($10 per 1,000), scaled by engagement between 0.75x
-        (no engagement) and 1.5x (15%+ of human impressions liked or commented). No upper cap.
+        A starting price (setting, $50), plus 1 cent per follower ($10 per 1,000), scaled by engagement between
+        0.75x (no engagement) and 1.5x (15%+ of human impressions liked or commented). Never below the starting
+        price, and no upper cap.
         """
         followers = await self.svc.creators.effective_human_followers(account)
         engagement = await self.svc.analytics.human_engagement_rate(account.id)
         multiplier = min(1.5, max(0.75, 0.75 + engagement * 5))
-        price = int((20_00 + followers) * multiplier)  # $20 base + $10 per 1,000 followers
-        return max(20_00, price // 100 * 100)
+        base = self.s.likeness_base_price_cents
+        price = int((base + followers) * multiplier)  # starting price + $10 per 1,000 followers
+        return max(base, price // 100 * 100)
 
     async def pricing_guide(self, account: Account) -> dict[str, Any]:
         profile = await self.svc.access.profile(account.id)
@@ -158,9 +160,7 @@ class LikenessPageService(BaseService):
         page = await self.repo(LikenessPage).first(LikenessPage.account_id == account.id)
         if page is None:
             raise NotFound("Set up the likeness page first")
-        if not recorded_in_app:
-            raise Unprocessable("Voice samples must be recorded in-app while reading the on-screen prompt",
-                                code="in_app_recording_required")
+        # LK-01: recorded in the app while reading the prompt, or uploaded; the consent box applies either way.
         if not VOICE_MIN_SECONDS <= duration_seconds <= VOICE_MAX_SECONDS:
             raise Unprocessable("Each clip must be 30-60 seconds", code="invalid_clip_length")
         if not voice_consent and page.voice_consent_at is None:
