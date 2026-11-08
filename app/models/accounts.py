@@ -111,6 +111,7 @@ class UserProfile(Model):
     # AG-05 auto-reply agent
     auto_reply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_reply_agent_id: Mapped[str | None] = mapped_column(String(32))
+    video_voice: Mapped[str | None] = mapped_column(String(10))  # female | male: the voice their AI videos use
 
 
 class CompanyProfile(Model):

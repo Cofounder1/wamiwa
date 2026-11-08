@@ -144,6 +144,8 @@ class AccountService(BaseService):
                 "notification_prefs": {t: (profile.notification_prefs or {}).get(t, True) for t in sorted(
                     {str(t) for t in NotificationType} - {str(t) for t in MANDATORY_NOTIFICATIONS})},
                 "daily_digest": profile.daily_digest,
+                "auto_reply": {"enabled": profile.auto_reply_enabled, "agent_id": profile.auto_reply_agent_id},
+                "video_voice": profile.video_voice,
             }
         if company:
             data["company"] = {

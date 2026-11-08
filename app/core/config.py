@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     protected_identity_names: list[str] = Field(default_factory=lambda: [
         "burna boy", "davido", "wizkid", "tiwa savage", "beyonce"])
     heygen_api_key: str | None = None
+    # The stock voices that read scripts (HeyGen's voice list doesn't say which voice is which gender, so these two
+    # were chosen by hand). Change them to any voice id from HeyGen's voice list.
+    heygen_voice_female: str = "4270665fc47f44aa989c093bb3dc2b99"  # Janet - Warm & Approachable
+    heygen_voice_male: str = "80b17a1be1594e578b92c0ddf4a37fc8"  # Lewis - Imaginative & Expressive
     # Africa's Talking: SMS codes and alerts, and the guardian confirmation call (ON-04, LK-09).
     # Username "sandbox" uses its sandbox, which reaches no real phone.
     africastalking_username: str | None = None

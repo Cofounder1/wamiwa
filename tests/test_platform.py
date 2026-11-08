@@ -81,8 +81,22 @@ async def test_personal_ai_video_pricing_and_refund(api):
     download = await api.ok("GET", f"/ai-videos/{video['id']}/download", user)
     assert download["watermarked"] and download["watermark_id"]
     assert (await api.ok("GET", "/ai-videos/quote?seconds=60&tier=standard", user))["price_cents"] == 3_00
+    listed = (await api.ok("GET", "/ai-videos", user))[0]
+    assert listed["script"] == "Hello there" and listed["post_id"] is None
     posted = await api.ok("POST", "/posts", user, json={"type": "video", "generated_video_id": video["id"]})
     assert posted["label_display"] == "Human + AI-generated"
+    assert (await api.ok("GET", "/ai-videos", user))[0]["post_id"] == posted["id"]  # linked, not posted twice
+    # It can be sent in a message as a video.
+    other = await api.signup("friend")
+    sent = await api.ok("POST", "/messages", user, json={"recipient_id": other.id, "body": "Look!", "attachments": [
+        {"kind": "video", "ref": video["file"], "size_bytes": 1000}]})
+    assert sent["attachments"][0]["ref"] == video["file"]
+    # Deleted: gone from the list and can't be posted again; the post that shows it stays.
+    await api.ok("DELETE", f"/ai-videos/{video['id']}", user)
+    assert all(v["id"] != video["id"] for v in await api.ok("GET", "/ai-videos", user))
+    await api.call("POST", "/posts", user, json={"type": "video", "generated_video_id": video["id"]}, expect=403)
+    await api.call("DELETE", f"/ai-videos/{video['id']}", user, expect=404)
+    await api.ok("GET", f"/posts/{posted['id']}", user)
 
     # Generation fails after payment: one retry, then an automatic refund.
     refunds = api.infra.providers.payments.main.refunds
@@ -341,3 +355,17 @@ async def test_monthly_ai_video_plan_counts_each_started_two_minutes(api):
     api.clock.advance(days=30, minutes=1)
     await api.run("ai_video_plans.renew_due")
     assert not (await api.ok("GET", "/ai-videos/plan", user))["active"]
+
+
+async def test_ai_video_refuses_before_charging_when_no_video_provider_is_connected(api):
+    """The live site: until a real video provider is connected, nothing is charged and no video "finishes"."""
+    from app.infra.providers.unavailable import VideoNotConnected
+
+    api.infra.providers.video = VideoNotConnected()
+    user = await api.influencer("maker", "Maker Person")
+    charges = len(api.infra.providers.payments.main.charges)
+    r = await api.call("POST", "/ai-videos", user, json={"script": "Hello there", "seconds": 90, "payment_method": PAY},
+                       expect=503)
+    assert r.json()["code"] == "video_unavailable"
+    assert len(api.infra.providers.payments.main.charges) == charges
+    assert await api.ok("GET", "/ai-videos", user) == []

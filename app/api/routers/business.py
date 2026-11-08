@@ -42,10 +42,11 @@ class ArconIn(PayIn):
 
 
 class AiVideoIn(BaseModel):
-    script: str = Field(min_length=3, max_length=10000)
+    script: str = Field(min_length=3, max_length=5000)  # the most the video service reads
     seconds: int = Field(ge=5, le=600)
     tier: VideoTier = VideoTier.STANDARD
     payment_method: str | None = Field(default=None, max_length=64)
+    voice: Literal["female", "male"] | None = None  # kept for their next videos and their likeness videos
 
 
 class CompanyVerificationIn(BaseModel):
@@ -219,7 +220,14 @@ async def my_ai_videos(p: Active, svc: Services):
 
 @router.post("/ai-videos", status_code=201)
 async def generate_ai_video(body: AiVideoIn, p: Active, svc: Services):
-    return ok(await svc.videos.generate_personal(p.account, body.script, body.seconds, body.tier, body.payment_method))
+    return ok(await svc.videos.generate_personal(p.account, body.script, body.seconds, body.tier, body.payment_method,
+                                                body.voice))
+
+
+@router.delete("/ai-videos/{video_id}")
+async def delete_ai_video(video_id: str, p: Active, svc: Services):
+    await svc.videos.delete_personal(p.account, video_id)
+    return ok()
 
 
 @router.get("/ai-videos/{video_id}/download")

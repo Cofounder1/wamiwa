@@ -8,6 +8,7 @@ import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 from functools import lru_cache
 from typing import AsyncIterator
@@ -15,6 +16,31 @@ from typing import AsyncIterator
 import httpx
 
 KEY_RE = re.compile(r"^[a-z_]+/[0-9a-f]{32}\.[a-z0-9]{1,5}$")
+RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+@dataclass
+class Served:
+    """A file, or the part of it a Range header asked for (206), ready to send. Phones and Safari only play a video
+    when the server answers byte ranges."""
+    chunks: AsyncIterator[bytes]
+    status: int = 200
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+def byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """(first, last) byte asked for, inclusive; None for the whole file. ValueError when it can't be satisfied."""
+    match = RANGE_RE.match((header or "").strip())
+    if not match or match.groups() == ("", ""):
+        return None
+    start, end = match.groups()
+    if start == "":  # the last N bytes
+        first, last = max(0, size - int(end)), size - 1
+    else:
+        first, last = int(start), min(int(end), size - 1) if end else size - 1
+    if first > last or first >= size:
+        raise ValueError("range not satisfiable")
+    return first, last
 
 
 class FileStorage(ABC):
@@ -51,6 +77,34 @@ class FileStorage(ABC):
                 await asyncio.to_thread(handle.close)
 
         return chunks()
+
+    async def serve(self, key: str, range_header: str | None = None) -> Served | None:
+        """The file for an HTTP answer: all of it, or the byte range asked for."""
+        path = self.path(key)
+        if path is None:
+            return None
+        size = (await asyncio.to_thread(path.stat)).st_size
+        try:
+            span = byte_range(range_header, size)
+        except ValueError:
+            return Served(_empty(), 416, {"Content-Range": f"bytes */{size}"})
+        first, last = span or (0, size - 1)
+
+        async def chunks() -> AsyncIterator[bytes]:
+            handle = await asyncio.to_thread(open, path, "rb")
+            try:
+                await asyncio.to_thread(handle.seek, first)
+                left = last - first + 1
+                while left > 0 and (chunk := await asyncio.to_thread(handle.read, min(1024 * 1024, left))):
+                    left -= len(chunk)
+                    yield chunk
+            finally:
+                await asyncio.to_thread(handle.close)
+
+        headers = {"Accept-Ranges": "bytes", "Content-Length": str(last - first + 1)}
+        if span is None:
+            return Served(chunks(), 200, headers)
+        return Served(chunks(), 206, headers | {"Content-Range": f"bytes {first}-{last}/{size}"})
 
     @abstractmethod
     async def delete(self, key: str) -> None: ...
@@ -164,11 +218,42 @@ class SupabaseFileStorage(LocalFileStorage):
 
         return chunks()
 
+    async def serve(self, key: str, range_header: str | None = None) -> Served | None:
+        if super().path(key) is not None:  # still staged: not moved yet
+            return await super().serve(key, range_header)
+        headers = {"Range": range_header} if range_header and RANGE_RE.match(range_header.strip()) else {}
+        request = self._client.build_request("GET", self._object(key), headers=headers)
+        response = await self._client.send(request, stream=True)
+        if response.status_code == 416:
+            await response.aclose()
+            return Served(_empty(), 416, {k: v for k, v in response.headers.items() if k.lower() == "content-range"})
+        if response.status_code not in (200, 206):
+            await response.aclose()
+            return None
+
+        async def chunks() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in response.aiter_bytes(1024 * 1024):
+                    yield chunk
+            finally:
+                await response.aclose()
+
+        passed = {"Accept-Ranges": "bytes"}
+        for name in ("Content-Length", "Content-Range"):
+            if name in response.headers:
+                passed[name] = response.headers[name]
+        return Served(chunks(), response.status_code, passed)
+
     async def delete(self, key: str) -> None:
         await super().delete(key)
         response = await self._client.request("DELETE", f"/object/{self.bucket}", json={"prefixes": [key]})
         if response.status_code >= 300 and response.status_code != 404:
             raise OSError(f"Supabase Storage didn't delete {key}: HTTP {response.status_code}")
+
+
+async def _empty() -> AsyncIterator[bytes]:
+    return
+    yield b""
 
 
 @lru_cache(maxsize=4)

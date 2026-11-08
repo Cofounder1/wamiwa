@@ -181,6 +181,7 @@ class GeneratedVideo(Model):
     plan_videos_used: Mapped[int] = mapped_column(Integer, default=0)  # AV-02: given back if generation fails
     retries: Mapped[int] = mapped_column(Integer, default=0)
     posted_post_id: Mapped[str | None] = mapped_column(String(32))
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # by its owner; kept for watermark tracing
 
 
 class GuardianConfirmation(Model):
