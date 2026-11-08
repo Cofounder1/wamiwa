@@ -133,7 +133,9 @@ def create_app(settings: Settings | None = None, infra: Infrastructure | None = 
                     "payments_mode": "live" if infra.settings.is_production and await infra.launch.is_live() else "test",
                     "identity": mode(providers.identity), "email": mode(providers.email), "sms": mode(providers.sms),
                     "voice": mode(providers.voice), "moderation": mode(providers.moderation),
-                    "trends": mode(providers.trends)}
+                    "trends": mode(providers.trends), "video": mode(providers.video),
+                    "uploads": "supabase" if infra.settings.supabase_url and infra.settings.supabase_secret_key
+                    else "server_disk"}
         return JSONResponse({"status": "ok" if healthy else "degraded", **checks, "services": services},
                             status_code=200 if healthy else 503)
 

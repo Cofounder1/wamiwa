@@ -167,7 +167,9 @@ class SandboxVideoGateway(VideoGateway):
 class SandboxWatermarkGateway(WatermarkGateway):
     async def embed(self, file_ref: str, payload: str) -> WatermarkResult:
         watermark_id = "wm_" + hashlib.sha256(f"{file_ref}:{payload}".encode()).hexdigest()[:24]
-        return WatermarkResult(watermark_id=watermark_id, file_ref=f"{file_ref}?wm={watermark_id}")
+        # The file itself is unchanged (there's no watermark vendor yet); the id still traces the video in Wamiwa's
+        # records. Changing the file name here would point downloads at a file that doesn't exist.
+        return WatermarkResult(watermark_id=watermark_id, file_ref=file_ref)
 
 
 class SandboxEmailGateway(EmailGateway):

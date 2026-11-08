@@ -4,10 +4,15 @@ Until the real payment provider (Flutterwave) and ID provider (YouVerify) are co
 "pay" for plans, fund escrow with no money, or pass ID checks. In production these refuse instead, with a clear
 message; free features keep working. Local development and tests keep the stand-ins.
 
+AI video has no stand-in on the live site even when stand-ins are allowed: the stand-in "finishes" a video
+that has no file, so on the live site video refuses until a real provider is connected.
+
 PayPal has no stand-in at all: until its keys are set it refuses everywhere, and people pay through Flutterwave.
 """
 from app.core.exceptions import ServiceUnavailable
-from app.infra.providers.base import IdentityGateway, IdentityResult, PaymentGateway, PayPalCheckout, TransferResult
+from app.infra.providers.base import (
+    IdentityGateway, IdentityResult, PaymentGateway, PayPalCheckout, TransferResult, VideoGateway, VideoJob, VideoRequest,
+)
 
 
 class PaymentsNotConnected(PaymentGateway):
@@ -59,3 +64,16 @@ class IdentityNotConnected(IdentityGateway):
 
     async def is_protected_identity(self, name: str) -> bool:
         self._refuse()
+
+
+class VideoNotConnected(VideoGateway):
+    MESSAGE = "AI video isn't available on Wamiwa yet. We'll let you know when it opens."
+
+    def ensure_available(self) -> None:
+        raise ServiceUnavailable(self.MESSAGE, code="video_unavailable")
+
+    async def submit(self, request: VideoRequest) -> str:
+        self.ensure_available()
+
+    async def fetch(self, job_id: str) -> VideoJob:
+        return VideoJob("failed", failure_reason="AI video isn't connected")

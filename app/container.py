@@ -17,7 +17,8 @@ from app.infra.providers.payment_router import PaymentRouter
 from app.infra.providers.paypal import PayPalGateway
 from app.infra.providers.youverify import YouVerifyIdentityGateway
 from app.infra.storage import build_storage
-from app.infra.providers.unavailable import IdentityNotConnected, PaymentsNotConnected, PayPalNotConnected
+from app.infra.providers.heygen import HeyGenVideoGateway
+from app.infra.providers.unavailable import IdentityNotConnected, PaymentsNotConnected, PayPalNotConnected, VideoNotConnected
 from app.infra.providers.sandbox import (
     HttpxWebhookTransport, SandboxEmailGateway, SandboxLinkSafetyGateway, SandboxMusicCatalogGateway, SandboxTrendGateway, SandboxIdentityGateway, SandboxModerationGateway,
     SandboxPaymentGateway, SandboxSmsGateway, SandboxSocialGateway, SandboxVideoGateway,
@@ -35,6 +36,18 @@ def build_email(settings: Settings) -> EmailGateway:
         return ResendEmailGateway(settings.email_api_key, settings.email_from_address, settings.email_from_name,
                                   reply_to=settings.email_reply_to)
     return SandboxEmailGateway()
+
+
+def build_video(settings: Settings):
+    """HeyGen once its key is set. Without it: the stand-in on a laptop, and a clear refusal on the live site (the
+    stand-in "finishes" videos that have no file)."""
+    if settings.heygen_api_key:
+        supabase = settings.supabase_url and settings.supabase_secret_key
+        return HeyGenVideoGateway(
+            settings.heygen_api_key, storage=build_storage(settings),
+            voices={"female": settings.heygen_voice_female, "male": settings.heygen_voice_male},
+            max_video_bytes=(settings.supabase_max_file_mb if supabase else 500) * 1024 * 1024)
+    return VideoNotConnected() if settings.is_production else SandboxVideoGateway()
 
 
 def build_sms_and_voice(settings: Settings) -> tuple[SmsGateway, VoiceGateway]:
@@ -103,7 +116,7 @@ def build_providers(settings: Settings, launch: LaunchState | None = None) -> Pr
         identity=identity,
         payments=payments,
         fx=fx,
-        video=SandboxVideoGateway(),
+        video=build_video(settings),
         watermark=SandboxWatermarkGateway(),
         email=build_email(settings),
         sms=sms,

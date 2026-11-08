@@ -110,12 +110,13 @@ async def serve_file(kind: str, name: str, request: Request):
     if kind not in PUBLIC_KINDS | MEMBER_KINDS:
         raise NotFound("File not found")
     try:
-        chunks = await storage(request).stream(f"{kind}/{name}")
+        served = await storage(request).serve(f"{kind}/{name}", request.headers.get("range"))
     except ValueError:  # not a valid file name
-        chunks = None
-    if chunks is None:
+        served = None
+    if served is None:
         raise NotFound("File not found")
     headers = {
+        **served.headers,
         "Cache-Control": "public, max-age=31536000, immutable" if kind in PUBLIC_KINDS else "private, max-age=3600",
         # Served exactly as the stored type and never run as a page, whatever is inside.
         "X-Content-Type-Options": "nosniff",
@@ -125,4 +126,4 @@ async def serve_file(kind: str, name: str, request: Request):
     if kind == "document":  # documents download rather than open in the API's own origin
         headers["Content-Disposition"] = f'attachment; filename="{name}"'
     media_type = EXTENSION_TYPES.get(name.rsplit(".", 1)[-1].lower(), "application/octet-stream")
-    return StreamingResponse(chunks, media_type=media_type, headers=headers)
+    return StreamingResponse(served.chunks, status_code=served.status, media_type=media_type, headers=headers)

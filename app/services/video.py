@@ -1,21 +1,28 @@
 """LK-06 video generation and approval, LK-10 production pricing and plans, AV-01 personal AI video."""
+import logging
 import math
 from datetime import timedelta
 from typing import Any
 
 from app.core.enums import (
-    ContractStatus, ContractType, NotificationType, PaymentPurpose, RejectionReason, TicketCategory,
+    ContractStatus, ContractType, ModerationStatus, NotificationType, PaymentPurpose, RejectionReason, TicketCategory,
     VideoDecision, VideoKind, VideoPlan, VideoStatus, VideoTier,
 )
 from app.core.exceptions import Conflict, Forbidden, NotFound, PaymentRequired, Unprocessable
 from app.infra.providers.base import VideoRequest
+from app.infra.storage import build_storage
 from app.models import (
-    Account, BrandVideoPlan, Contract, CreatorVideoPlan, GeneratedVideo, LikenessConsent, Subscription, VideoProduction,
+    Account, BrandVideoPlan, Contract, CreatorVideoPlan, GeneratedVideo, LikenessConsent, Post, Subscription,
+    VideoProduction,
 )
 from app.services.base import BaseService
 
+log = logging.getLogger("wamiwa.video")
+
 PLAN_PERIOD_DAYS = 30
 
+
+VOICES = ("female", "male")  # the voice that reads a script
 
 class VideoPlanService(BaseService):
     def _terms(self, plan: VideoPlan) -> tuple[int, int]:
@@ -204,6 +211,7 @@ class VideoGenerationService(BaseService):
             raise NotFound("Contract not found")
         if contract.status != ContractStatus.ACTIVE:
             raise Conflict("Videos can be generated once the contract is active", code="invalid_contract_status")
+        self.providers.video.ensure_available()
         script = await self.svc.likeness.signed_script(contract.id)  # only the exact script that was signed
         consent = await self.repo(LikenessConsent).first(LikenessConsent.contract_id == contract.id)
         await self.limiter.enforce(self.policies.video_generation, brand.id)
@@ -233,7 +241,7 @@ class VideoGenerationService(BaseService):
             seconds=production.seconds, payment_id=payment.id if payment else None))
         video.provider_job_id = await self.providers.video.submit(VideoRequest(
             reference=video.id, script=script.text, face_ref=profile.face_ref or "", voice_ref=voice,
-            quality=kind, seconds=production.seconds))
+            quality=kind, seconds=production.seconds, voice=profile.video_voice or "female"))
         await self._refresh(video)
         return {**self.present(video), "counter": await self.counter(contract.id)}
 
@@ -300,13 +308,15 @@ class VideoGenerationService(BaseService):
         if video.contract_id is None:
             profile = await self.svc.access.profile(video.owner_account_id)
             return VideoRequest(reference=video.id, script=video.script_text, face_ref=profile.face_ref or "",
-                                voice_ref=None, quality=video.tier or VideoTier.STANDARD, seconds=video.seconds)
+                                voice_ref=None, quality=video.tier or VideoTier.STANDARD, seconds=video.seconds,
+                                voice=profile.video_voice or "female")
         contract = await self.repo(Contract).require(video.contract_id)
         consent = await self.repo(LikenessConsent).first(LikenessConsent.contract_id == contract.id)
         profile = await self.svc.access.profile(contract.earner_id)
         voice = await self.svc.likeness_pages.voice_ref(contract.earner_id) if consent and consent.includes_voice else None
         return VideoRequest(reference=video.id, script=video.script_text, face_ref=profile.face_ref or "",
-                            voice_ref=voice, quality=video.kind, seconds=video.seconds)
+                            voice_ref=voice, quality=video.kind, seconds=video.seconds,
+                            voice=profile.video_voice or "female")
 
     async def _handle_failure(self, video: GeneratedVideo, reason: str) -> GeneratedVideo:
         if video.kind == VideoKind.PERSONAL and video.retries < 1:
@@ -515,7 +525,8 @@ class VideoGenerationService(BaseService):
         return max(0, self.s.subscriber_free_standard_seconds - used)
 
     async def generate_personal(self, account: Account, script: str, seconds: int, tier: VideoTier,
-                                payment_method: str | None) -> dict:
+                                payment_method: str | None, voice: str | None = None) -> dict:
+        self.providers.video.ensure_available()
         profile = await self.svc.access.require_adult(account, "generate AI video")  # not for minors outside a contract
         if not profile.id_verified or not profile.face_ref:
             # Only your own face, matched to your verified identity; there is no way to supply another face.
@@ -546,17 +557,47 @@ class VideoGenerationService(BaseService):
             owner_account_id=account.id, kind=VideoKind.PERSONAL, tier=tier, script_text=script.strip(),
             seconds=seconds, payment_id=payment.id if payment else None,
             plan_videos_used=quote["plan_videos_applied"]))
+        if voice in VOICES:
+            profile.video_voice = voice  # their likeness videos use the same voice
         video.provider_job_id = await self.providers.video.submit(VideoRequest(
             reference=video.id, script=video.script_text, face_ref=profile.face_ref, voice_ref=None,
-            quality=tier, seconds=seconds))
+            quality=tier, seconds=seconds, voice=profile.video_voice or "female"))
         await self._refresh(video)
         return {**self.present(video), "charged_cents": quote["price_cents"],
                 "plan_videos_used": quote["plan_videos_applied"]}
 
-    async def download(self, account: Account, video_id: str) -> dict[str, Any]:
+    async def _own_personal(self, account: Account, video_id: str) -> GeneratedVideo:
         video = await self.repo(GeneratedVideo).require(video_id, "Video not found")
-        if video.owner_account_id != account.id or video.kind != VideoKind.PERSONAL:
+        if video.owner_account_id != account.id or video.kind != VideoKind.PERSONAL or video.deleted_at:
             raise NotFound("Video not found")
+        return video
+
+    async def delete_personal(self, account: Account, video_id: str) -> None:
+        """The video leaves the list and its file is deleted, unless a post still shows it (deleting the post later
+        doesn't bring the video back). The record stays, so the watermark still traces a leaked copy."""
+        video = await self._own_personal(account, video_id)
+        if video.status == VideoStatus.PROCESSING:
+            raise Conflict("This video is still being made. Delete it once it's finished.", code="video_processing")
+        video.deleted_at = self.now()
+        file_ref = video.file_ref
+        if not file_ref or video.status != VideoStatus.READY:
+            return
+        in_post = await self.repo(Post).first(Post.media_ref == file_ref,
+                                              Post.moderation_status != ModerationStatus.REMOVED)
+        if in_post:
+            return
+        storage = build_storage(self.infra.settings)
+
+        async def remove() -> None:
+            try:
+                await storage.delete(file_ref)
+            except (OSError, ValueError) as exc:
+                log.warning("deleted video %s: file %s not removed: %s", video_id, file_ref, exc)
+
+        self.uow.on_commit(remove)
+
+    async def download(self, account: Account, video_id: str) -> dict[str, Any]:
+        video = await self._own_personal(account, video_id)
         if video.status != VideoStatus.READY:
             raise Conflict("This video is not ready yet", code="video_not_ready")
         return {"download": video.file_ref, "watermark_id": video.watermark_id, "watermarked": True}
@@ -564,8 +605,15 @@ class VideoGenerationService(BaseService):
     async def list_personal(self, account: Account) -> list[dict]:
         videos = await self.repo(GeneratedVideo).list(
             GeneratedVideo.owner_account_id == account.id, GeneratedVideo.kind == VideoKind.PERSONAL,
-            order_by=GeneratedVideo.id.desc(), limit=100)
-        return [self.present(v) for v in videos]
+            GeneratedVideo.deleted_at.is_(None), order_by=GeneratedVideo.id.desc(), limit=100)
+        # The post each finished video is already in, so the page can link to it rather than post it twice.
+        files = [v.file_ref for v in videos if v.file_ref]
+        posts = await self.repo(Post).list(Post.author_account_id == account.id, Post.media_ref.in_(files),
+                                           Post.moderation_status != ModerationStatus.REMOVED) if files else []
+        posted = {p.media_ref: p.id for p in posts}
+        # The script comes back so a video can be made again (a retry after a failure, or another take).
+        return [{**self.present(v), "script": v.script_text,
+                 "post_id": posted.get(v.file_ref) if v.status == VideoStatus.READY else None} for v in videos]
 
     async def trace_watermark(self, watermark_id: str) -> dict[str, Any]:
         """Admin tool: the watermark supports tracing a leaked video back to its source."""

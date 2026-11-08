@@ -122,6 +122,7 @@ class VideoRequest:
     seconds: int
     lip_sync: bool = True  # lip movement must follow the words of the script
     expressive: bool = True  # facial expression must follow the meaning of the script
+    voice: str = "female"  # female | male: which stock voice reads the script when there's no voice of their own
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,9 @@ class VideoJob:
 
 
 class VideoGateway(ABC):
+    def ensure_available(self) -> None:
+        """Called before any money is taken for a video; a provider that can't make videos refuses here."""
+
     @abstractmethod
     async def submit(self, request: VideoRequest) -> str:
         """Start a generation job and return the provider's job id."""

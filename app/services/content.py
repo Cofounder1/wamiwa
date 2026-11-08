@@ -129,7 +129,7 @@ class PostService(BaseService):
 
         if generated_video_id:
             video = await self.repo(GeneratedVideo).require(generated_video_id, "Video not found")
-            if video.owner_account_id != author.id or video.status != VideoStatus.READY:
+            if video.owner_account_id != author.id or video.status != VideoStatus.READY or video.deleted_at:
                 raise Forbidden("You can only post your own finished videos", code="video_not_available")
             media_ref, duration_seconds, ai_generated, type = video.file_ref, video.seconds, True, PostType.VIDEO
         if type == PostType.VIDEO and not media_ref:
